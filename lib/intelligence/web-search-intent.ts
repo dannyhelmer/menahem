@@ -2,7 +2,14 @@
 // search -- ported from the Python app's tools/web_search/intent.py.
 
 const RECENCY_RE =
-  /\b(latest|current(ly)?|recent(ly)?|this (week|month|year)|right now|as of (now|today)|up[- ]to[- ]date|breaking news|today'?s|tonight'?s|happening (today|tonight|right now)|who is the current \w+|what('s| is) (the )?(latest|current))\b/i;
+  /\b(latest|current(ly)?|recent(ly)?|this (week|month|year)|right now|as of (now|today)|up[- ]to[- ]date|breaking news|today'?s|tonight'?s|yesterday'?s?|last night|happening (today|tonight|right now|now)|what'?s (happening|going on)|who is the current \w+|who won\b|what('s| is) (the )?(latest|current))\b/i;
+
+// Explicit user request to search, regardless of whether the message would
+// otherwise look like it needs live info -- always honored even for a
+// message that would otherwise skip search entirely (e.g. "search the web
+// for the plot of Hamlet").
+const EXPLICIT_SEARCH_OVERRIDE_RE =
+  /\b(search (the web|online|the internet)|look (this|it) up|find (me )?sources|use web search|go online and|check online)\b/i;
 
 const HISTORICAL_RE =
   /\b(history of|historical(ly)?|in (18|19|20)\d{2}|incident|assassination(s)?|scandal|treaty|battle of|war of|siege of|what happened (to|when|during)|during (his|her|their) (presidency|administration|term|career|visit|tenure))\b/i;
@@ -28,4 +35,8 @@ export function detectOfflineRequest(text: string): boolean {
 
 export function detectEntityLookupNeed(text: string): boolean {
   return ENTITY_LOOKUP_PHRASING_RE.test(text) && PROPER_NAME_HINT_RE.test(text);
+}
+
+export function detectExplicitSearchOverride(text: string): boolean {
+  return EXPLICIT_SEARCH_OVERRIDE_RE.test(text);
 }

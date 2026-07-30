@@ -23,6 +23,7 @@ import { getDocument, getDocumentText } from "@/lib/documents/store";
 import { getResearchCategory } from "@/lib/research-categories/config";
 import {
   detectEntityLookupNeed,
+  detectExplicitSearchOverride,
   detectHistoricalVerificationNeed,
   detectOfflineRequest,
   detectRecencyNeed,
@@ -279,9 +280,22 @@ async function routeMessage(
   let sources: SearchSource[] | undefined;
 
   const offline = detectOfflineRequest(text);
-  const autoSearch =
+  const explicitOverride = detectExplicitSearchOverride(text);
+  const needsLiveInfo =
     !offline && (detectRecencyNeed(text) || detectHistoricalVerificationNeed(text) || detectEntityLookupNeed(text));
-  const shouldSearch = webSearchEnabled || autoSearch;
+  // Web Search enabled means PERMISSION to search, not an instruction to
+  // search every message -- forcing a search on every turn (the old
+  // `webSearchEnabled || autoSearch` behavior) is what produced irrelevant
+  // "generic filler" answers for messages that never needed live data in
+  // the first place (e.g. "2+2" or "explain the Constitution"). An explicit
+  // ask ("search the web", "look this up") always searches regardless of
+  // the toggle or the heuristic.
+  const shouldSearch = !offline && (explicitOverride || needsLiveInfo);
+
+  console.log(
+    `[web-search] decision for "${text.slice(0, 120)}": ${shouldSearch ? "SEARCH" : "SKIP"} ` +
+      `(webSearchEnabled=${webSearchEnabled}, explicitOverride=${explicitOverride}, needsLiveInfo=${needsLiveInfo}, offline=${offline})`,
+  );
 
   if (shouldSearch) {
     label = CATEGORY_LABELS.web_search;
@@ -289,14 +303,34 @@ async function routeMessage(
     // message actually looks like a short follow-up or a reply to a
     // clarifying question -- always safe to call.
     const { query } = await resolveFollowupTopic(text, messagesSnapshot, userId);
+    console.log(`[web-search] raw query sent to search provider: "${query}"`);
 
-    const searchResult = await runSearchForMessage(query);
+    const searchResult = await runSearchForMessage(query, needsLiveInfo ? 10 : 6, {
+      preferRecent: detectRecencyNeed(text),
+    });
     if (searchResult.success && searchResult.liveData) {
       liveDataParts.push(searchResult.liveData);
       sources = searchResult.sources;
-    } else if (searchResult.note) {
-      liveDataParts.push(searchResult.note);
+    } else {
+      // Never let the model fall back to "I don't have web browsing" when
+      // Web Search actually ran -- state plainly that the search itself
+      // came up empty/failed instead, which is the true situation.
+      liveDataParts.push(
+        (searchResult.note ?? "Web search ran but returned no usable results.") +
+          " A web search WAS attempted for this message -- do not claim you lack web browsing capability. " +
+          "Instead, tell the user plainly that the search didn't return relevant current results for this " +
+          "specific query, and answer from general knowledge only if you clearly label it as such.",
+      );
     }
+  } else if (webSearchEnabled) {
+    // Search is enabled for the conversation but this specific message
+    // didn't need it -- make sure the model still knows live search is
+    // available so it never claims otherwise if asked directly.
+    liveDataParts.push(
+      "Web Search mode is enabled for this conversation. This particular message didn't need a live search " +
+        "(no recent/current-events signal detected), so none was run -- but never claim you lack web browsing " +
+        "capability; a search will run automatically for messages that need current information.",
+    );
   }
 
   if (detectCriticism(text)) liveDataParts.push(CRITICISM_GUIDANCE);
@@ -442,10 +476,12 @@ export const POST = withAuth(async (request, _ctx, user) => {
           writeFrame({ type: "token", value: assistantText });
         } else {
           const liveData = liveDataParts.length ? liveDataParts.join("\n\n---\n\n") : undefined;
-          const fullMessages: ChatMessage[] = [
-            { role: "system", content: await buildSystemPrompt(liveData, user.id) },
-            ...messages,
-          ];
+          const systemPrompt = await buildSystemPrompt(liveData, user.id);
+          const fullMessages: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...messages];
+          console.log(
+            `[web-search] final system prompt sent to model (${systemPrompt.length} chars). Live data section:\n` +
+              (liveData ?? "(none)"),
+          );
           const result = await provider.streamChat(
             fullMessages,
             (piece) => {
