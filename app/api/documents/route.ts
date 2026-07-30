@@ -1,6 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import mammoth from "mammoth";
+import "@/lib/documents/pdf-polyfills";
 import { PDFParse } from "pdf-parse";
 import { generateDocumentSummary } from "@/lib/documents/summarize";
 import { listDocuments, saveDocument } from "@/lib/documents/store";
