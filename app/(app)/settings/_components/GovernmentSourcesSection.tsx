@@ -59,6 +59,10 @@ function ProviderKeyRow({ providerId, label }: { providerId: string; label: stri
         <>
           <input
             type="password"
+            name={`${providerId}-api-key`}
+            autoComplete="new-password"
+            data-lpignore="true"
+            data-1p-ignore="true"
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder="Paste API key"

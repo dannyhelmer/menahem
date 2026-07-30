@@ -59,6 +59,16 @@ function ProviderKeyRow({ providerId, label }: { providerId: string; label: stri
         <>
           <input
             type="password"
+            name={`${providerId}-api-key`}
+            // A bare type="password" input with no autoComplete/name looks
+            // like a login credential to the browser, which offers to
+            // autofill (or overwrite) the account's saved password into it
+            // and then prompts to "update password" on save. "new-password"
+            // plus a non-credential name tells the browser this is a
+            // distinct secret, not the account login.
+            autoComplete="new-password"
+            data-lpignore="true"
+            data-1p-ignore="true"
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder="Paste API key"
