@@ -120,7 +120,13 @@ export default function Sidebar() {
           <input
             type="text"
             name="conversation-search"
-            autoComplete="off"
+            // Chrome's "Addresses and more" autofill (name/email/phone)
+            // ignores plain autoComplete="off" on ordinary text inputs --
+            // "new-password" is the documented, reliable way to make Chrome
+            // treat a field as genuinely not-autofillable regardless of type.
+            autoComplete="new-password"
+            data-lpignore="true"
+            data-1p-ignore="true"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search conversations"

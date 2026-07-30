@@ -31,7 +31,9 @@ export default function AccountSection({ initialProfile }: { initialProfile: Own
         </label>
         <input
           id="name"
-          autoComplete="off"
+          autoComplete="new-password"
+          data-lpignore="true"
+          data-1p-ignore="true"
           value={name}
           onChange={(event) => setName(event.target.value)}
           className="focus:border-burgundy/50 w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 focus:outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
@@ -47,7 +49,9 @@ export default function AccountSection({ initialProfile }: { initialProfile: Own
         </label>
         <input
           id="preferredName"
-          autoComplete="off"
+          autoComplete="new-password"
+          data-lpignore="true"
+          data-1p-ignore="true"
           value={preferredName}
           onChange={(event) => setPreferredName(event.target.value)}
           className="focus:border-burgundy/50 w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 focus:outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
