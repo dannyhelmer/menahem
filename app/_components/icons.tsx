@@ -20,6 +20,8 @@ import {
   Settings,
   HelpCircle,
   ChevronRight,
+  Paperclip,
+  X,
 } from "lucide-react";
 
 export function SendIcon() {
@@ -84,4 +86,12 @@ export function HelpIcon() {
 
 export function ChevronRightIcon() {
   return <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />;
+}
+
+export function AttachIcon() {
+  return <Paperclip className="h-4 w-4 shrink-0" aria-hidden="true" />;
+}
+
+export function CloseIcon() {
+  return <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />;
 }

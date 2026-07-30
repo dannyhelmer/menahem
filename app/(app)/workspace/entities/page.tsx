@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { requireApprovedPageUser } from "@/lib/auth/session";
 import { listAllEntities } from "@/lib/graph/store";
 import { humanize } from "@/lib/graph/humanize";
 import type { EntityType, GraphEntity } from "@/lib/graph/types";
+
+export const metadata: Metadata = {
+  title: "All Entities",
+};
 
 function groupByType(entities: GraphEntity[]): [EntityType, GraphEntity[]][] {
   const groups = new Map<EntityType, GraphEntity[]>();

@@ -1,7 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { requireAdminPageUser } from "@/lib/auth/session";
 import { listUsers } from "@/lib/auth/users";
 import AdminDashboard from "@/app/_components/AdminDashboard";
+
+export const metadata: Metadata = {
+  title: "Admin",
+};
 
 export default async function AdminPage() {
   await requireAdminPageUser();

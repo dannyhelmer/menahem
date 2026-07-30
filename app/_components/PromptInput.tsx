@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { FlaskIcon, GlobeIcon, SendIcon } from "./icons";
+import { AttachIcon, CloseIcon, FlaskIcon, GlobeIcon, SendIcon } from "./icons";
 
 const MAX_TEXTAREA_HEIGHT = 200;
+
+export interface AttachedDocumentState {
+  filename: string;
+  status: "uploading" | "ready" | "error";
+}
 
 export default function PromptInput({
   value,
@@ -14,6 +19,9 @@ export default function PromptInput({
   onToggleWebSearch,
   deepResearchEnabled,
   onToggleDeepResearch,
+  onUploadDocument,
+  attachedDocument,
+  onClearAttachedDocument,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -23,8 +31,12 @@ export default function PromptInput({
   onToggleWebSearch: () => void;
   deepResearchEnabled: boolean;
   onToggleDeepResearch: () => void;
+  onUploadDocument?: (file: File) => void;
+  attachedDocument?: AttachedDocumentState | null;
+  onClearAttachedDocument?: () => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -47,10 +59,35 @@ export default function PromptInput({
     }
   }
 
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-selecting the same file later
+    if (file) onUploadDocument?.(file);
+  }
+
   return (
     <form onSubmit={handleSubmit} className="w-full">
       <div className="focus-within:border-burgundy/50 rounded-3xl border border-neutral-200 bg-white p-3 pl-5 shadow-sm transition-shadow duration-150 focus-within:shadow-md dark:border-neutral-800 dark:bg-neutral-900">
         <div className="mb-1.5 flex items-center gap-1.5">
+          {onUploadDocument && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleFileChange}
+                accept=".pdf,application/pdf"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Attach a document"
+                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-neutral-400 transition-colors duration-150 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                <AttachIcon />
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={onToggleWebSearch}
@@ -78,6 +115,25 @@ export default function PromptInput({
             Deep Research
           </button>
         </div>
+
+        {attachedDocument && (
+          <div className="mb-1.5 flex items-center gap-2 self-start rounded-full border border-neutral-200 bg-neutral-50 py-1 pr-1 pl-3 text-xs text-neutral-600 dark:border-neutral-800 dark:bg-neutral-800 dark:text-neutral-300">
+            <span className="max-w-[220px] truncate">
+              {attachedDocument.status === "uploading" && "Uploading "}
+              {attachedDocument.status === "error" && "Failed to upload "}
+              {attachedDocument.filename}
+            </span>
+            <button
+              type="button"
+              onClick={onClearAttachedDocument}
+              aria-label="Remove attached document"
+              className="rounded-full p-0.5 text-neutral-400 hover:text-red-600"
+            >
+              <CloseIcon />
+            </button>
+          </div>
+        )}
+
         <div className="flex items-end gap-3">
           <textarea
             ref={textareaRef}

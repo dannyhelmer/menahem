@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import AddToProjectButton from "@/app/_components/AddToProjectButton";
@@ -5,6 +6,16 @@ import { requireApprovedPageUser } from "@/lib/auth/session";
 import { getConnectedEntities, getEntity } from "@/lib/graph/store";
 import { humanize } from "@/lib/graph/humanize";
 import { getTimeline } from "@/lib/timeline/store";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const entity = await getEntity(decodeURIComponent(id));
+  return { title: entity ? entity.label : { absolute: "Menahem" } };
+}
 
 function DataFields({ data }: { data: Record<string, unknown> }) {
   const entries = Object.entries(data).filter(

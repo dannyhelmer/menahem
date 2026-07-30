@@ -10,7 +10,7 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/jwt";
 // live Postgres read) happens in every route/page itself via
 // lib/auth/with-auth.ts and lib/auth/session.ts's requireApproved*
 // helpers -- see those for why relying on this file alone would be wrong.
-const PUBLIC_PATHS = ["/signin", "/signup", "/privacy", "/terms"];
+const PUBLIC_PATHS = ["/signin", "/signup", "/privacy", "/terms", "/about"];
 // /api/auth/me deliberately allows both logged-in and logged-out callers --
 // it always responds 200 with { user: null } when there's no session, so it
 // must never be blocked here before it gets a chance to say that.

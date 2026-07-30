@@ -119,6 +119,8 @@ export default function Sidebar() {
           <SearchIcon />
           <input
             type="text"
+            name="conversation-search"
+            autoComplete="off"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search conversations"

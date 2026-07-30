@@ -12,15 +12,17 @@ export function LegalSection({ heading, children }: { heading: string; children:
 export default function LegalPageLayout({
   title,
   lastUpdated,
+  maxWidthClassName = "max-w-2xl",
   children,
 }: {
   title: string;
-  lastUpdated: string;
+  lastUpdated?: string;
+  maxWidthClassName?: string;
   children: React.ReactNode;
 }) {
   return (
     <main className="flex-1 overflow-y-auto px-6 py-12">
-      <div className="mx-auto max-w-2xl">
+      <div className={`mx-auto ${maxWidthClassName}`}>
         <Link
           href="/"
           className="hover:text-burgundy mb-8 inline-block text-sm text-neutral-500 dark:text-neutral-400"
@@ -28,8 +30,12 @@ export default function LegalPageLayout({
           ← Back to Menahem
         </Link>
 
-        <h1 className="mb-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-50">{title}</h1>
-        <p className="mb-8 text-sm text-neutral-400 dark:text-neutral-500">Last Updated: {lastUpdated}</p>
+        <h1 className={`text-2xl font-semibold text-neutral-900 dark:text-neutral-50 ${lastUpdated ? "mb-1" : "mb-8"}`}>
+          {title}
+        </h1>
+        {lastUpdated && (
+          <p className="mb-8 text-sm text-neutral-400 dark:text-neutral-500">Last Updated: {lastUpdated}</p>
+        )}
 
         <div className="space-y-6 text-sm leading-relaxed text-neutral-600 dark:text-neutral-300">{children}</div>
       </div>
