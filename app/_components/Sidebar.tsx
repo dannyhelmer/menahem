@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { ConversationSummary } from "@/lib/memory/types";
 import type { OwnerProfile } from "@/lib/settings/owner-profile";
@@ -52,15 +52,25 @@ function SidebarContent({
   query: string;
   onQueryChange: (value: string) => void;
 }) {
-  const router = useRouter();
+  // Sending a message from "/" updates the URL bar to /c/<id> via a raw
+  // history.replaceState (useChatSession.ts) rather than a real Next.js
+  // navigation -- deliberately, so the in-progress streaming reply isn't
+  // interrupted by a route change/remount. The tradeoff: Next's client
+  // router never learns the route actually changed, so it still believes
+  // the current route is "/". A subsequent router.push("/") then looks
+  // like a no-op navigation to Next (already "there"), which is exactly
+  // the reported bug -- New Chat silently doing nothing until enough
+  // clicks/navigations desync-and-resync the router by accident. A full
+  // reload sidesteps that entirely and guarantees a genuinely empty chat
+  // every time, which is what "New Chat" should always do anyway.
+  function startNewChat() {
+    window.location.href = "/";
+  }
 
   return (
     <>
       <button
-        onClick={() => {
-          router.push("/");
-          onNavigate();
-        }}
+        onClick={startNewChat}
         className="flex items-center gap-2 px-5 pt-6 pb-5 text-left"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- avoids next/image's optimizer cache for this tiny static asset */}
@@ -72,10 +82,7 @@ function SidebarContent({
 
       <div className="px-4">
         <button
-          onClick={() => {
-            router.push("/");
-            onNavigate();
-          }}
+          onClick={startNewChat}
           className="bg-burgundy hover:bg-burgundy-dark flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-colors duration-150 active:scale-[0.98]"
         >
           <PlusIcon />
