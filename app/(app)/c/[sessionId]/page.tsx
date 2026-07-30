@@ -17,7 +17,9 @@ export async function generateMetadata({
   params: Promise<{ sessionId: string }>;
 }): Promise<Metadata> {
   const { sessionId } = await params;
-  const session = await loadSession(sessionId);
+  const user = await requireApprovedPageUser().catch(() => null);
+  if (!user) return { title: { absolute: "Menahem" } };
+  const session = await loadSession(sessionId, user.id);
   if (!session || session.title === FALLBACK_TITLE) return { title: { absolute: "Menahem" } };
   return { title: session.title };
 }
@@ -29,7 +31,7 @@ export default async function ConversationPage({
 }) {
   const user = await requireApprovedPageUser();
   const { sessionId } = await params;
-  const [session, needsApiKey] = await Promise.all([loadSession(sessionId), needsApiKeySetup(user.id)]);
+  const [session, needsApiKey] = await Promise.all([loadSession(sessionId, user.id), needsApiKeySetup(user.id)]);
   if (!session) notFound();
 
   const initialMessages = session.messages.map((message, index) => ({

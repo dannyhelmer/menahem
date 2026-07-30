@@ -83,8 +83,8 @@ const MAX_DOCUMENT_CONTEXT_LENGTH = 12_000;
 // Phase 15: folds an uploaded document's real, extracted text into liveData
 // -- capped so a long PDF can't crowd out the rest of the context window.
 // Never pretends to have read more than what's actually shown.
-async function buildDocumentContext(documentId: string): Promise<string | null> {
-  const [document, text] = await Promise.all([getDocument(documentId), getDocumentText(documentId)]);
+async function buildDocumentContext(documentId: string, userId: string): Promise<string | null> {
+  const [document, text] = await Promise.all([getDocument(documentId, userId), getDocumentText(documentId, userId)]);
   if (!document || !text) return null;
 
   const excerpt = text.slice(0, MAX_DOCUMENT_CONTEXT_LENGTH);
@@ -171,7 +171,7 @@ async function routeMessage(
 
   // Uploaded-document context (Phase 15) -- same unconditional-push pattern,
   // applies regardless of which branch below handles the message.
-  const documentContext = documentId ? await buildDocumentContext(documentId) : null;
+  const documentContext = documentId ? await buildDocumentContext(documentId, userId) : null;
   if (documentContext) liveDataParts.push(documentContext);
 
   if (isFastPathMessage(text)) {
@@ -354,7 +354,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
     requestedSessionId && isValidSessionId(requestedSessionId) ? requestedSessionId : randomUUID();
 
   const userMessage = messages[messages.length - 1];
-  const existingSession = await loadSession(sessionId);
+  const existingSession = await loadSession(sessionId, user.id);
   const hadAssistantReply = existingSession?.messages.some((m) => m.role === "assistant") ?? false;
 
   // "Continue Report" (a message asking the model to resume its own
@@ -363,7 +363,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
   // Persisting it as a visible chat bubble would clutter the conversation
   // with a synthetic message the user never actually typed.
   if (!continuation) {
-    await appendMessage(sessionId, { role: "user", content: userMessage.content }, categorySlug);
+    await appendMessage(sessionId, user.id, { role: "user", content: userMessage.content }, categorySlug);
   }
 
   const encoder = new TextEncoder();
@@ -397,8 +397,8 @@ export const POST = withAuth(async (request, _ctx, user) => {
           const finalText = truncated ? trimToSentenceBoundary(assistantText) : assistantText;
           if (truncated) writeFrame({ type: "truncated", content: finalText });
 
-          await appendToLastMessage(sessionId, finalText, { truncated });
-          await touchEndTime(sessionId);
+          await appendToLastMessage(sessionId, user.id, finalText, { truncated });
+          await touchEndTime(sessionId, user.id);
           return;
         }
 
@@ -426,7 +426,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
 
         // The actual "citation referencing the uploaded document" (Phase 15) --
         // merged in regardless of which branch handled the message.
-        const documentSource = documentId ? await getDocument(documentId) : null;
+        const documentSource = documentId ? await getDocument(documentId, user.id) : null;
         const allSources = documentSource
           ? [...(sources ?? []), { title: documentSource.filename, url: `/api/documents/${documentSource.id}/file` }]
           : sources;
@@ -462,7 +462,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
           writeFrame({ type: "truncated", content: assistantText });
         }
 
-        await appendMessage(sessionId, {
+        await appendMessage(sessionId, user.id, {
           role: "assistant",
           content: assistantText,
           sources: allSources,
@@ -470,14 +470,14 @@ export const POST = withAuth(async (request, _ctx, user) => {
           confidenceReason,
           truncated,
         });
-        await touchEndTime(sessionId);
+        await touchEndTime(sessionId, user.id);
 
         if (!hadAssistantReply) {
           after(async () => {
-            const session = await loadSession(sessionId);
+            const session = await loadSession(sessionId, user.id);
             if (!session) return;
             const title = await generateTitle(session.messages, user.id);
-            await renameSession(sessionId, title);
+            await renameSession(sessionId, user.id, title);
           });
         }
       } catch (err) {
