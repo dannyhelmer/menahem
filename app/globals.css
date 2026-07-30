@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Manual light/dark/system toggle (Settings) drives this via a data-theme
+   attribute on <html>, set before first paint by an inline script in the
+   root layout -- replaces the old prefers-color-scheme-only default so
+   dark: utilities and these custom properties respond to the same thing. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -14,11 +20,9 @@
   --color-burgundy-dark: #5e171f;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 body {

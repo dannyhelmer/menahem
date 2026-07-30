@@ -5,6 +5,7 @@ import AccountSection from "./_components/AccountSection";
 import AiProvidersSection from "./_components/AiProvidersSection";
 import GovernmentSourcesSection from "./_components/GovernmentSourcesSection";
 import SearchProvidersSection from "./_components/SearchProvidersSection";
+import ThemeSection from "./_components/ThemeSection";
 
 export default async function SettingsPage() {
   await requireApprovedPageUser();
@@ -29,6 +30,13 @@ export default async function SettingsPage() {
             Account
           </h2>
           <AccountSection initialProfile={profile} />
+        </section>
+
+        <section className="mt-10">
+          <h2 className="mb-4 text-lg font-medium text-neutral-900 dark:text-neutral-100">
+            Appearance
+          </h2>
+          <ThemeSection />
         </section>
 
         <section className="mt-10">

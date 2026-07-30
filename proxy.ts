@@ -10,8 +10,11 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/jwt";
 // live Postgres read) happens in every route/page itself via
 // lib/auth/with-auth.ts and lib/auth/session.ts's requireApproved*
 // helpers -- see those for why relying on this file alone would be wrong.
-const PUBLIC_PATHS = ["/signin", "/signup"];
-const PUBLIC_API_PATHS = ["/api/auth/signin", "/api/auth/signup"];
+const PUBLIC_PATHS = ["/signin", "/signup", "/privacy", "/terms"];
+// /api/auth/me deliberately allows both logged-in and logged-out callers --
+// it always responds 200 with { user: null } when there's no session, so it
+// must never be blocked here before it gets a chance to say that.
+const PUBLIC_API_PATHS = ["/api/auth/signin", "/api/auth/signup", "/api/auth/me"];
 
 function matchesAny(pathname: string, list: string[]): boolean {
   return list.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -31,7 +34,11 @@ export async function proxy(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
     }
-    return NextResponse.redirect(new URL("/signin", request.url));
+    // Most private-beta visitors are creating an account for the first
+    // time, not returning -- Sign Up is the default entry point. /signin
+    // stays reachable directly (it's in PUBLIC_PATHS) for anyone who
+    // already has an account.
+    return NextResponse.redirect(new URL("/signup", request.url));
   }
 
   return NextResponse.next();

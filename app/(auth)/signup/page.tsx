@@ -29,10 +29,8 @@ export default function SignUpPage() {
       return;
     }
 
-    // New accounts aren't approved by default -- middleware sends
-    // unapproved sessions to /private-beta automatically, so this doesn't
-    // need to duplicate that check.
-    router.push("/");
+    const data = (await response.json()) as { approved: boolean };
+    router.push(data.approved ? "/" : "/private-beta");
     router.refresh();
   }
 
