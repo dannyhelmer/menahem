@@ -13,21 +13,23 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const project = await getProject(id);
+  const user = await requireApprovedPageUser().catch(() => null);
+  if (!user) return { title: { absolute: "Menahem" } };
+  const project = await getProject(id, user.id);
   return { title: project ? project.name : { absolute: "Menahem" } };
 }
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireApprovedPageUser();
+  const user = await requireApprovedPageUser();
   const { id } = await params;
-  const project = await getProject(id);
+  const project = await getProject(id, user.id);
   if (!project) notFound();
 
   const [entities, conversations, recent, documents] = await Promise.all([
     Promise.all(project.entityIds.map((entityId) => getEntity(entityId))),
-    getSummaries(project.conversationIds),
-    listRecent(20, false),
-    listDocuments(id),
+    getSummaries(user.id, project.conversationIds),
+    listRecent(user.id, 20, false),
+    listDocuments(id, user.id),
   ]);
 
   const linkableConversations = recent.filter((c) => !project.conversationIds.includes(c.sessionId));

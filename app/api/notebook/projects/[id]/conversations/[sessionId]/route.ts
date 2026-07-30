@@ -4,9 +4,9 @@ import { removeConversationFromProject } from "@/lib/notebook/store";
 export const dynamic = "force-dynamic";
 
 export const DELETE = withAuth(
-  async (_request: Request, { params }: { params: Promise<{ id: string; sessionId: string }> }) => {
+  async (_request: Request, { params }: { params: Promise<{ id: string; sessionId: string }> }, user) => {
     const { id, sessionId } = await params;
-    await removeConversationFromProject(id, sessionId);
+    await removeConversationFromProject(id, user.id, sessionId);
     return Response.json({ ok: true });
   },
 );

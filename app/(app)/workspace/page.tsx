@@ -10,8 +10,8 @@ export const metadata: Metadata = {
 };
 
 export default async function WorkspacePage() {
-  await requireApprovedPageUser();
-  const projects = await listProjects();
+  const user = await requireApprovedPageUser();
+  const projects = await listProjects(user.id);
 
   return (
     <main className="flex-1 overflow-y-auto px-6 py-10">
