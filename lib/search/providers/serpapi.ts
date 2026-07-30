@@ -23,10 +23,12 @@ export const serpApiProvider: SearchProvider = {
     url.searchParams.set("q", query);
     url.searchParams.set("engine", "google");
 
+    console.log(`[serpapi] search request: query="${query}" maxResults=${maxResults}`);
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw cleanProviderError("SerpAPI", response.status);
 
     const data = (await response.json()) as SerpApiResponse;
+    console.log(`[serpapi] raw response: ${(data.organic_results ?? []).length} results`);
     return (data.organic_results ?? []).slice(0, maxResults).map((r) => ({
       title: r.title,
       url: r.link,

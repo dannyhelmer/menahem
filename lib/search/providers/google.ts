@@ -25,10 +25,12 @@ export const googleProvider: SearchProvider = {
     url.searchParams.set("q", query);
     url.searchParams.set("num", String(Math.min(maxResults, 10)));
 
+    console.log(`[google] search request: query="${query}" maxResults=${maxResults}`);
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw cleanProviderError("Google Custom Search", response.status);
 
     const data = (await response.json()) as GoogleResponse;
+    console.log(`[google] raw response: ${(data.items ?? []).length} results`);
     return (data.items ?? []).slice(0, maxResults).map((r) => ({
       title: r.title,
       url: r.link,
