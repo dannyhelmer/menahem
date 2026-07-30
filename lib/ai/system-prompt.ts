@@ -347,7 +347,7 @@ function formatRuntimeContext(): string {
 // actual moment the request was made, never a value cached at server start.
 // Reads the owner profile from disk on every call (no in-memory cache) so a
 // Settings save takes effect on the very next chat turn.
-export async function buildSystemPrompt(liveData?: string): Promise<string> {
+export async function buildSystemPrompt(liveData?: string, userId?: string): Promise<string> {
   const { preferredName } = await getOwnerProfile();
   const ownerBlock =
     `This account is configured with the display name "${preferredName}" -- address the user by that name. ` +
@@ -355,9 +355,10 @@ export async function buildSystemPrompt(liveData?: string): Promise<string> {
     "Daniel Helmer (Menahem's creator) or infer anything else about who they are beyond this name, unless they " +
     "tell you directly in the conversation.";
 
+  const provider = await getProvider(userId);
   const parts = [
     BASE_SYSTEM_PROMPT,
-    `Currently running on: ${getProvider().description}.`,
+    `Currently running on: ${provider.description}.`,
     formatRuntimeContext(),
     ownerBlock,
   ];

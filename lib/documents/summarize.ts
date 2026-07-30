@@ -4,8 +4,8 @@ const FALLBACK_SUMMARY = "Summary unavailable -- Menahem's local model wasn't re
 const MAX_INPUT_LENGTH = 12_000;
 
 // Same one-shot, non-streaming pattern as lib/memory/title.ts's generateTitle.
-export async function generateDocumentSummary(text: string): Promise<string> {
-  const provider = getProvider();
+export async function generateDocumentSummary(text: string, userId?: string): Promise<string> {
+  const provider = await getProvider(userId);
   if (!(await provider.isConfigured())) return FALLBACK_SUMMARY;
 
   const excerpt = text.slice(0, MAX_INPUT_LENGTH);

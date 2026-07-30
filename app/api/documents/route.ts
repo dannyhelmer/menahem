@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { PDFParse } from "pdf-parse";
 import { generateDocumentSummary } from "@/lib/documents/summarize";
 import { listDocuments, saveDocument } from "@/lib/documents/store";
+import { withAuth } from "@/lib/auth/with-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,15 +19,15 @@ PDFParse.setWorker(
   ).href,
 );
 
-export async function GET(request: Request) {
+export const GET = withAuth(async (request: Request) => {
   const projectId = new URL(request.url).searchParams.get("projectId");
   if (!projectId) return Response.json({ error: "projectId is required." }, { status: 400 });
 
   const documents = await listDocuments(projectId);
   return Response.json({ documents });
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withAuth(async (request: Request, _ctx, user) => {
   const formData = await request.formData();
   const projectId = formData.get("projectId");
   const file = formData.get("file");
@@ -59,8 +60,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const summary = await generateDocumentSummary(text);
+  const summary = await generateDocumentSummary(text, user.id);
   const document = await saveDocument({ projectId, filename: file.name, summary }, buffer, text);
 
   return Response.json(document);
-}
+});

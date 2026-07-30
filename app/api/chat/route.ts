@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { getProvider } from "@/lib/ai/get-provider";
 import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import type { ChatMessage } from "@/lib/ai/types";
+import { withAuth } from "@/lib/auth/with-auth";
 import { resolveFollowupTopic } from "@/lib/intelligence/conversation-manager";
 import { CRITICISM_GUIDANCE, detectCriticism } from "@/lib/intelligence/criticism";
 import { isFastPathMessage, isSystemTestMessage, SYSTEM_TEST_GUIDANCE } from "@/lib/intelligence/fast-path";
@@ -155,6 +156,7 @@ async function routeMessage(
   webSearchEnabled: boolean,
   deepResearchEnabled: boolean,
   onStage: (label: string) => void,
+  userId: string,
   categorySlug?: string,
   documentId?: string,
 ): Promise<RouteOutcome> {
@@ -205,7 +207,7 @@ async function routeMessage(
 
   if (wantsDeepResearch) {
     const { jurisdiction, state } = resolveJurisdictionAndState(text, politicalIntents);
-    const packet = await runDeepResearch(text, politicalIntents, jurisdiction, state, onStage);
+    const packet = await runDeepResearch(text, politicalIntents, jurisdiction, state, onStage, userId);
 
     liveDataParts.push(packet.liveData);
     if (detectCriticism(text)) liveDataParts.push(CRITICISM_GUIDANCE);
@@ -286,7 +288,7 @@ async function routeMessage(
     // resolveFollowupTopic no-ops internally (no LLM call) unless the
     // message actually looks like a short follow-up or a reply to a
     // clarifying question -- always safe to call.
-    const { query } = await resolveFollowupTopic(text, messagesSnapshot);
+    const { query } = await resolveFollowupTopic(text, messagesSnapshot, userId);
 
     const searchResult = await runSearchForMessage(query);
     if (searchResult.success && searchResult.liveData) {
@@ -303,7 +305,7 @@ async function routeMessage(
   return { category: shouldSearch ? "web_search" : category, label, liveDataParts, sources };
 }
 
-export async function POST(request: Request) {
+export const POST = withAuth(async (request, _ctx, user) => {
   const {
     messages,
     sessionId: requestedSessionId,
@@ -326,7 +328,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "No messages provided." }, { status: 400 });
   }
 
-  const provider = getProvider();
+  // requireApprovedUser() (inside withAuth) already confirmed this account
+  // is authenticated and approved -- this is the separate, AI-specific
+  // check: does this approved user actually have a usable model configured
+  // (their own OpenAI key in production, or Ollama in dev)?
+  const provider = await getProvider(user.id);
   if (!(await provider.isConfigured())) {
     const error =
       provider.name === "cloud"
@@ -367,7 +373,7 @@ export async function POST(request: Request) {
           // as the last assistant turn) carries whatever grounding it needs;
           // this just picks up where it left off.
           const fullMessages: ChatMessage[] = [
-            { role: "system", content: await buildSystemPrompt() },
+            { role: "system", content: await buildSystemPrompt(undefined, user.id) },
             ...messages,
           ];
           const { truncated } = await provider.streamChat(
@@ -404,6 +410,7 @@ export async function POST(request: Request) {
           Boolean(webSearchEnabled),
           Boolean(deepResearchEnabled),
           onStage,
+          user.id,
           categorySlug,
           documentId,
         );
@@ -427,7 +434,7 @@ export async function POST(request: Request) {
         } else {
           const liveData = liveDataParts.length ? liveDataParts.join("\n\n---\n\n") : undefined;
           const fullMessages: ChatMessage[] = [
-            { role: "system", content: await buildSystemPrompt(liveData) },
+            { role: "system", content: await buildSystemPrompt(liveData, user.id) },
             ...messages,
           ];
           const result = await provider.streamChat(
@@ -460,7 +467,7 @@ export async function POST(request: Request) {
           after(async () => {
             const session = await loadSession(sessionId);
             if (!session) return;
-            const title = await generateTitle(session.messages);
+            const title = await generateTitle(session.messages, user.id);
             await renameSession(sessionId, title);
           });
         }
@@ -481,4 +488,4 @@ export async function POST(request: Request) {
       "X-Session-Id": sessionId,
     },
   });
-}
+});

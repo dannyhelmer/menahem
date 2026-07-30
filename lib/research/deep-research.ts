@@ -11,8 +11,8 @@ const CONFIDENCE_RANK: Record<ResearchPacket["confidence"], number> = { high: 3,
 // One quick LLM call, same pattern as lib/memory/title.ts -- not a heavy
 // agent loop. Falls back to the original question (as its own sole
 // "sub-question") on any failure, empty result, or a degenerate response.
-export async function decomposeQuestion(question: string): Promise<string[]> {
-  const provider = getProvider();
+export async function decomposeQuestion(question: string, userId?: string): Promise<string[]> {
+  const provider = await getProvider(userId);
   if (!(await provider.isConfigured())) return [question];
 
   const prompt =
@@ -44,9 +44,10 @@ export async function runDeepResearch(
   jurisdiction: Jurisdiction,
   state: string | null,
   onStage?: (label: string) => void,
+  userId?: string,
 ): Promise<ResearchPacket> {
   onStage?.("Planning research");
-  const subquestions = await decomposeQuestion(question);
+  const subquestions = await decomposeQuestion(question, userId);
 
   onStage?.("Searching sources");
   const packets = await Promise.all(

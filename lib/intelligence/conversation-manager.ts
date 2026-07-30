@@ -38,6 +38,7 @@ export interface FollowupResolution {
 export async function resolveFollowupTopic(
   text: string,
   messagesSnapshot: ChatMessage[],
+  userId?: string,
 ): Promise<FollowupResolution> {
   if (!isShortFollowup(text) && !isReplyToClarifyingQuestion(text, messagesSnapshot)) {
     return { query: text, resolved: false };
@@ -56,7 +57,8 @@ export async function resolveFollowupTopic(
 
   let result = "";
   try {
-    await getProvider().streamChat([{ role: "user", content: prompt }], (piece) => {
+    const provider = await getProvider(userId);
+    await provider.streamChat([{ role: "user", content: prompt }], (piece) => {
       result += piece;
     });
   } catch {

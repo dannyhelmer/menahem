@@ -4,8 +4,8 @@ import type { StoredMessage } from "./types";
 const FALLBACK_TITLE = "New conversation";
 const MAX_TITLE_LENGTH = 80;
 
-export async function generateTitle(messages: StoredMessage[]): Promise<string> {
-  const provider = getProvider();
+export async function generateTitle(messages: StoredMessage[], userId?: string): Promise<string> {
+  const provider = await getProvider(userId);
   if (!(await provider.isConfigured())) return FALLBACK_TITLE;
 
   const transcript = messages
