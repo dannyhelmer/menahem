@@ -22,8 +22,8 @@ function SettingsCard({ title, children }: { title: string; children: React.Reac
 }
 
 export default async function SettingsPage() {
-  await requireApprovedPageUser();
-  const profile = await getOwnerProfile();
+  const user = await requireApprovedPageUser();
+  const profile = await getOwnerProfile(user.id);
 
   return (
     <main className="flex-1 overflow-y-auto px-6 py-10 sm:px-8">

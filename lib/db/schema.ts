@@ -31,6 +31,12 @@ async function runMigrations(): Promise<void> {
       UNIQUE (user_id, provider)
     )
   `;
+
+  // Added after the users table already existed in production -- ALTER
+  // ... ADD COLUMN IF NOT EXISTS instead of folding into the CREATE TABLE
+  // above, since that statement only ever runs against a brand-new table.
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name text`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_name text`;
 }
 
 export function ensureSchema(): Promise<void> {

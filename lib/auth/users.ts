@@ -11,6 +11,8 @@ export interface User {
   plan: string;
   createdAt: string;
   lastLoginAt: string | null;
+  fullName: string | null;
+  preferredName: string | null;
 }
 
 // A comma-separated allowlist of emails that are always treated as admin +
@@ -46,6 +48,8 @@ function mapRow(row: any): User {
     plan: row.plan,
     createdAt: row.created_at,
     lastLoginAt: row.last_login_at,
+    fullName: row.full_name,
+    preferredName: row.preferred_name,
   };
 }
 
@@ -97,4 +101,17 @@ export async function deleteUser(id: string): Promise<void> {
 export async function touchLastLogin(id: string): Promise<void> {
   await ensureSchema();
   await sql`UPDATE users SET last_login_at = now() WHERE id = ${id}`;
+}
+
+export async function updateProfile(
+  id: string,
+  profile: { fullName?: string; preferredName?: string },
+): Promise<void> {
+  await ensureSchema();
+  if (profile.fullName !== undefined) {
+    await sql`UPDATE users SET full_name = ${profile.fullName} WHERE id = ${id}`;
+  }
+  if (profile.preferredName !== undefined) {
+    await sql`UPDATE users SET preferred_name = ${profile.preferredName} WHERE id = ${id}`;
+  }
 }

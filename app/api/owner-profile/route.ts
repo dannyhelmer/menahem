@@ -3,11 +3,11 @@ import { getOwnerProfile, saveOwnerProfile } from "@/lib/settings/owner-profile"
 
 export const dynamic = "force-dynamic";
 
-export const GET = withAuth(async () => {
-  return Response.json(await getOwnerProfile());
+export const GET = withAuth(async (_request, _ctx, user) => {
+  return Response.json(await getOwnerProfile(user.id));
 });
 
-export const PATCH = withAuth(async (request: Request) => {
+export const PATCH = withAuth(async (request: Request, _ctx, user) => {
   const body = (await request.json()) as { name?: string; preferredName?: string };
   const patch: { name?: string; preferredName?: string } = {};
 
@@ -16,6 +16,6 @@ export const PATCH = withAuth(async (request: Request) => {
     patch.preferredName = body.preferredName.trim();
   }
 
-  const updated = await saveOwnerProfile(patch);
+  const updated = await saveOwnerProfile(user.id, patch);
   return Response.json(updated);
 });

@@ -348,7 +348,7 @@ function formatRuntimeContext(): string {
 // Reads the owner profile from disk on every call (no in-memory cache) so a
 // Settings save takes effect on the very next chat turn.
 export async function buildSystemPrompt(liveData?: string, userId?: string): Promise<string> {
-  const { preferredName } = await getOwnerProfile();
+  const { preferredName } = userId ? await getOwnerProfile(userId) : { preferredName: "Guest" };
   const ownerBlock =
     `This account is configured with the display name "${preferredName}" -- address the user by that name. ` +
     "This is only a display name set in Settings, not a confirmed identity claim: do not assume this person is " +
