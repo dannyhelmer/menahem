@@ -1,14 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type { AttachedDocumentState } from "./chat-types";
 import { AttachIcon, CloseIcon, FlaskIcon, GlobeIcon, SendIcon } from "./icons";
 
 const MAX_TEXTAREA_HEIGHT = 200;
-
-export interface AttachedDocumentState {
-  filename: string;
-  status: "uploading" | "ready" | "error";
-}
 
 export default function PromptInput({
   value,
@@ -68,7 +64,7 @@ export default function PromptInput({
   return (
     <form onSubmit={handleSubmit} className="w-full">
       <div className="focus-within:border-burgundy/50 rounded-3xl border border-neutral-200 bg-white p-3 pl-5 shadow-sm transition-shadow duration-150 focus-within:shadow-md dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="mb-1.5 flex items-center gap-1.5">
+        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           {onUploadDocument && (
             <>
               <input
@@ -76,7 +72,7 @@ export default function PromptInput({
                 type="file"
                 className="hidden"
                 onChange={handleFileChange}
-                accept=".pdf,application/pdf"
+                accept=".pdf,.docx,.txt,.md,application/pdf"
               />
               <button
                 type="button"
@@ -148,7 +144,7 @@ export default function PromptInput({
             type="submit"
             aria-label="Send message"
             disabled={!canSubmit}
-            className="bg-burgundy hover:bg-burgundy-dark flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition-all duration-150 hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+            className="bg-burgundy hover:bg-burgundy-dark flex h-10 w-10 shrink-0 grow-0 items-center justify-center rounded-full text-white transition-all duration-150 hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
           >
             <SendIcon />
           </button>

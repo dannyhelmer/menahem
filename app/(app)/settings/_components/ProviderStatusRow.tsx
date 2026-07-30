@@ -4,8 +4,8 @@
 // vars), not something an individual user sets up.
 export default function ProviderStatusRow({ label, configured }: { label: string; configured: boolean }) {
   return (
-    <div className="flex items-center gap-3 text-sm">
-      <span className="w-44 shrink-0 text-neutral-700 dark:text-neutral-300">{label}</span>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+      <span className="w-full shrink-0 text-neutral-700 sm:w-44 dark:text-neutral-300">{label}</span>
       {configured ? (
         <span className="flex items-center gap-1.5 text-green-700 dark:text-green-500">
           <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0">

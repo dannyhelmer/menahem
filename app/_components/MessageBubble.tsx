@@ -69,10 +69,10 @@ function SourcesList({
               href={source.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-burgundy inline-flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400"
+              className="hover:text-burgundy flex w-full min-w-0 items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400"
             >
               <LinkIcon />
-              <span className="truncate">{source.title || source.url}</span>
+              <span className="min-w-0 flex-1 truncate">{source.title || source.url}</span>
             </a>
           </li>
         ))}
@@ -190,8 +190,14 @@ export default function MessageBubble({
 }) {
   if (message.role === "user") {
     return (
-      <div className="flex justify-end">
-        <div className="bg-burgundy/10 dark:bg-burgundy/20 max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] text-neutral-800 dark:text-neutral-100">
+      <div className="flex flex-col items-end gap-1">
+        {message.attachedFilename && (
+          <span className="flex max-w-[85%] min-w-0 items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">
+            <LinkIcon />
+            <span className="min-w-0 truncate">{message.attachedFilename}</span>
+          </span>
+        )}
+        <div className="bg-burgundy/10 dark:bg-burgundy/20 max-w-[85%] min-w-0 rounded-2xl px-4 py-2.5 text-[15px] break-words text-neutral-800 dark:text-neutral-100">
           {message.content}
         </div>
       </div>
@@ -200,14 +206,14 @@ export default function MessageBubble({
 
   if (message.error) {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-[15px] text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+      <div className="min-w-0 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-[15px] break-words text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
         {message.content || "Something went wrong."}
       </div>
     );
   }
 
   return (
-    <div className="max-w-[85%] text-[15px] text-neutral-800 dark:text-neutral-100">
+    <div className="max-w-[85%] min-w-0 text-[15px] break-words text-neutral-800 dark:text-neutral-100">
       <Markdown content={message.content} />
       {message.sources && message.sources.length > 0 && (
         <SourcesList
