@@ -112,8 +112,24 @@ export function useChatSession({
 }) {
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages ?? []);
   const [status, setStatus] = useState<"idle" | "streaming">("idle");
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  // Persisted across the whole conversation (and page refreshes) -- once a
+  // user turns Web Search on, it should stay on until THEY explicitly turn
+  // it off, not silently reset after every message.
+  const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("menahem:webSearchEnabled") === "true";
+  });
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
+
+  function toggleWebSearch() {
+    setWebSearchEnabled((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("menahem:webSearchEnabled", String(next));
+      }
+      return next;
+    });
+  }
   const sessionIdRef = useRef<string | undefined>(initialSessionId);
   const { refresh } = useConversationsRefresh();
 
@@ -188,7 +204,9 @@ export function useChatSession({
     setStatus("streaming");
     const searchRequested = webSearchEnabled;
     const deepResearchRequested = overrides?.deepResearchEnabled ?? deepResearchEnabled;
-    setWebSearchEnabled(false);
+    // Web Search is a persistent conversation-level mode now, not a one-shot
+    // action -- it stays enabled until the user explicitly turns it off (see
+    // toggleWebSearch above). Deep Research is still a per-message action.
     setDeepResearchEnabled(false);
 
     try {
@@ -323,7 +341,7 @@ export function useChatSession({
     messages,
     status,
     webSearchEnabled,
-    toggleWebSearch: () => setWebSearchEnabled((prev) => !prev),
+    toggleWebSearch,
     deepResearchEnabled,
     toggleDeepResearch: () => setDeepResearchEnabled((prev) => !prev),
     sendMessage,
