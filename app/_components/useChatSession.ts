@@ -2,8 +2,9 @@
 
 import { useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/ai/types";
+import { deriveProjectName } from "@/lib/documents/derive-project-name";
 import { useConversationsRefresh } from "./ConversationsProvider";
-import type { UiMessage } from "./chat-types";
+import type { AttachedDocumentState, UiMessage } from "./chat-types";
 
 function createId(): string {
   return crypto.randomUUID();
@@ -103,12 +104,16 @@ export function useChatSession({
   initialSessionId,
   initialMessages,
   category,
-  documentId,
+  initialDocumentId,
 }: {
   initialSessionId?: string;
   initialMessages?: UiMessage[];
   category?: string;
-  documentId?: string;
+  // A fixed document context for the whole session (e.g. DocumentQnA's
+  // embedded per-document panel) -- distinct from the composer's own
+  // upload flow below, which lets the document attached to a message
+  // change turn to turn.
+  initialDocumentId?: string;
 }) {
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages ?? []);
   const [status, setStatus] = useState<"idle" | "streaming">("idle");
@@ -120,6 +125,44 @@ export function useChatSession({
     return window.localStorage.getItem("menahem:webSearchEnabled") === "true";
   });
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
+  const [attachedDocument, setAttachedDocument] = useState<AttachedDocumentState | null>(null);
+  const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId);
+
+  // Owned here (not by the calling view) so it's available identically
+  // whether the composer is currently rendered via Dashboard (no messages
+  // yet) or ConversationThread (mid-conversation) -- previously this lived
+  // in ChatView and was only ever wired into Dashboard's PromptInput, so the
+  // attach button silently disappeared the moment the first message sent
+  // and the view switched to ConversationThread.
+  async function uploadDocument(file: File) {
+    setAttachedDocument({ filename: file.name, status: "uploading" });
+    try {
+      const projectRes = await fetch("/api/notebook/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: deriveProjectName(file.name) }),
+      });
+      if (!projectRes.ok) throw new Error("Failed to create project");
+      const project = (await projectRes.json()) as { id: string };
+
+      const formData = new FormData();
+      formData.append("projectId", project.id);
+      formData.append("file", file);
+      const documentRes = await fetch("/api/documents", { method: "POST", body: formData });
+      if (!documentRes.ok) throw new Error("Failed to upload document");
+      const document = (await documentRes.json()) as { id: string };
+
+      setDocumentId(document.id);
+      setAttachedDocument({ filename: file.name, status: "ready" });
+    } catch {
+      setAttachedDocument({ filename: file.name, status: "error" });
+    }
+  }
+
+  function clearAttachedDocument() {
+    setAttachedDocument(null);
+    setDocumentId(undefined);
+  }
 
   function toggleWebSearch() {
     setWebSearchEnabled((prev) => {
@@ -195,10 +238,15 @@ export function useChatSession({
       { role: "user", content: trimmed },
     ];
     const assistantId = createId();
+    // Captured before any state updates below -- this is the document (if
+    // any) attached to THIS specific message, not whatever's still in
+    // state after it's cleared a few lines down.
+    const documentIdForThisMessage = documentId;
+    const attachedFilename = attachedDocument?.status === "ready" ? attachedDocument.filename : undefined;
 
     setMessages((prev) => [
       ...prev,
-      { id: createId(), role: "user", content: trimmed },
+      { id: createId(), role: "user", content: trimmed, attachedFilename },
       { id: assistantId, role: "assistant", content: "" },
     ]);
     setStatus("streaming");
@@ -208,6 +256,15 @@ export function useChatSession({
     // action -- it stays enabled until the user explicitly turns it off (see
     // toggleWebSearch above). Deep Research is still a per-message action.
     setDeepResearchEnabled(false);
+    // A composer-driven attachment belongs to THIS message only -- clear it
+    // so it doesn't silently keep applying to every later, unrelated
+    // message. A session that started with a fixed initialDocumentId (e.g.
+    // DocumentQnA's embedded per-document panel) never sets
+    // attachedDocument at all, so that fixed context is left untouched here.
+    if (attachedDocument) {
+      setAttachedDocument(null);
+      setDocumentId(undefined);
+    }
 
     try {
       const response = await fetch("/api/chat", {
@@ -219,7 +276,7 @@ export function useChatSession({
           webSearchEnabled: searchRequested,
           deepResearchEnabled: deepResearchRequested,
           category,
-          documentId,
+          documentId: documentIdForThisMessage,
         }),
       });
 
@@ -347,5 +404,8 @@ export function useChatSession({
     sendMessage,
     continueMessage,
     retryWithDeepResearch,
+    attachedDocument,
+    uploadDocument,
+    clearAttachedDocument,
   };
 }

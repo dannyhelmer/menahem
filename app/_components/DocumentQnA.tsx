@@ -21,7 +21,7 @@ export default function DocumentQnA({ documentId }: { documentId: string }) {
     sendMessage,
     continueMessage,
     retryWithDeepResearch,
-  } = useChatSession({ documentId });
+  } = useChatSession({ initialDocumentId: documentId });
 
   function handleSubmit() {
     sendMessage(draft);

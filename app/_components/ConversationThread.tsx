@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import ChatDisclaimer from "./ChatDisclaimer";
-import type { UiMessage } from "./chat-types";
+import type { AttachedDocumentState, UiMessage } from "./chat-types";
 import MessageList from "./MessageList";
 import PromptInput from "./PromptInput";
 
@@ -22,6 +22,9 @@ export default function ConversationThread({
   onToggleWebSearch,
   deepResearchEnabled,
   onToggleDeepResearch,
+  onUploadDocument,
+  attachedDocument,
+  onClearAttachedDocument,
 }: {
   messages: UiMessage[];
   streaming: boolean;
@@ -35,6 +38,9 @@ export default function ConversationThread({
   onToggleWebSearch: () => void;
   deepResearchEnabled: boolean;
   onToggleDeepResearch: () => void;
+  onUploadDocument?: (file: File) => void;
+  attachedDocument?: AttachedDocumentState | null;
+  onClearAttachedDocument?: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -67,6 +73,9 @@ export default function ConversationThread({
             onToggleWebSearch={onToggleWebSearch}
             deepResearchEnabled={deepResearchEnabled}
             onToggleDeepResearch={onToggleDeepResearch}
+            onUploadDocument={onUploadDocument}
+            attachedDocument={attachedDocument}
+            onClearAttachedDocument={onClearAttachedDocument}
           />
           <ChatDisclaimer />
         </div>
