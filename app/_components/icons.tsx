@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Paperclip,
   X,
+  Menu,
 } from "lucide-react";
 
 export function SendIcon() {
@@ -94,4 +95,8 @@ export function AttachIcon() {
 
 export function CloseIcon() {
   return <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />;
+}
+
+export function MenuIcon() {
+  return <Menu className="h-5 w-5" aria-hidden="true" />;
 }

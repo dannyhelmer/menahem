@@ -21,7 +21,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white dark:bg-neutral-950">
       <Sidebar />
-      {children}
+      {/* pt-14 reserves space for Sidebar's fixed mobile top bar (h-14) --
+          only needed below md, where that bar is fixed/out-of-flow and
+          would otherwise overlap the first ~56px of page content. */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden pt-14 md:pt-0">{children}</div>
       {user && !user.preferredName && <ProfileOnboarding />}
     </div>
   );
