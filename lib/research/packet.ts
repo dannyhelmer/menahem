@@ -5,6 +5,7 @@ import type { GovDataProvider } from "@/lib/gov-data/types";
 import { getConnectedEntities } from "@/lib/graph/store";
 import { getTimeline } from "@/lib/timeline/store";
 import { runSearchForMessage } from "@/lib/search/orchestrate";
+import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
 import { sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
 
 const LEGISLATIVE_SUMMARY_INTENTS: PoliticalIntent[] = [
@@ -126,21 +127,25 @@ export function buildConfidenceReason(
   const counts: Record<SourceTier, number> = { government: 0, news: 0, reference: 0, general: 0 };
   for (const s of sources) counts[s.tier]++;
 
-  const parts: string[] = [];
-  if (counts.government > 0) parts.push(`${counts.government} official government source${counts.government === 1 ? "" : "s"}`);
-  if (counts.news > 0) parts.push(`${counts.news} news source${counts.news === 1 ? "" : "s"}`);
-  if (counts.reference > 0) parts.push(`${counts.reference} reference source${counts.reference === 1 ? "" : "s"}`);
-  if (counts.general > 0) parts.push(`${counts.general} other source${counts.general === 1 ? "" : "s"}`);
+  // A checkmark-style breakdown reads as an actual evidence inventory
+  // rather than a vague "based on some sources" sentence -- lets a reader
+  // see at a glance whether a rating is backed by official records, wire
+  // reporting, or just a couple of general pages.
+  const lines: string[] = [];
+  if (counts.government > 0) lines.push(`✓ ${counts.government} official government source${counts.government === 1 ? "" : "s"}`);
+  if (counts.news > 0) lines.push(`✓ ${counts.news} news organization${counts.news === 1 ? "" : "s"}`);
+  if (counts.reference > 0) lines.push(`✓ ${counts.reference} academic/reference source${counts.reference === 1 ? "" : "s"}`);
+  if (counts.general > 0) lines.push(`✓ ${counts.general} other source${counts.general === 1 ? "" : "s"}`);
 
-  const basis = parts.length > 0 ? `Based on ${parts.join(", ")}.` : "No sources were retrieved for this question.";
+  const basis = lines.length > 0 ? `Based on:\n${lines.join("\n")}` : "No sources were retrieved for this question.";
 
-  if (confidence === "low") return `${basis} Not enough was found to verify specific details with confidence.`;
+  if (confidence === "low") return `${basis}\nNot enough was found to verify specific details with confidence.`;
   if (confidence === "medium") {
-    return `${basis} At least one source was found, but not enough official corroboration to rate this higher.`;
+    return `${basis}\nAt least one source was found, but not enough official corroboration to rate this higher.`;
   }
   return directGovHit
-    ? `${basis} Retrieved directly from an authoritative government data source.`
-    : `${basis} Corroborated by an official government source alongside others.`;
+    ? `${basis}\nRetrieved directly from an authoritative government data source.`
+    : `${basis}\nCorroborated by an official government source alongside others.`;
 }
 
 function selectGovProviders(intents: Set<PoliticalIntent>, jurisdiction: Jurisdiction): GovDataProvider[] {
@@ -186,7 +191,7 @@ export async function buildResearchPacket(
     }
   }
 
-  const searchResult = await runSearchForMessage(question);
+  const searchResult = await runSearchForMessage(question, 10, { preferRecent: detectRecencyNeed(question) });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
     for (const s of searchResult.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url) });

@@ -6,9 +6,9 @@ import Markdown from "./Markdown";
 import type { UiMessage } from "./chat-types";
 
 const CONFIDENCE_LABEL: Record<NonNullable<UiMessage["confidence"]>, string> = {
-  high: "Confidence: High",
-  medium: "Confidence: Medium",
-  low: "Confidence: Low",
+  high: "Evidence Strength: High",
+  medium: "Evidence Strength: Medium",
+  low: "Evidence Strength: Low",
 };
 
 // Clickable, not just a static label -- "why is this Medium?" gets a real,
@@ -36,7 +36,11 @@ function ConfidenceDisclosure({
       >
         {CONFIDENCE_LABEL[confidence]}
       </button>
-      {open && <p className="mt-1 max-w-[240px] text-left text-xs text-neutral-500 dark:text-neutral-400">{reason}</p>}
+      {open && (
+        <p className="mt-1 max-w-[240px] text-left text-xs whitespace-pre-line text-neutral-500 dark:text-neutral-400">
+          {reason}
+        </p>
+      )}
     </div>
   );
 }

@@ -1,32 +1,66 @@
-// Four-tier source ranking, ported from the Python app's tools/deep_research.py.
+// Source ranking. SourceTier stays the coarse 4-bucket type everywhere it's
+// already used for counts/UI (government/news/reference/general), but the
+// domain lists and sourceAuthorityRank below implement a finer 6-tier
+// authority order for actual SORTING within those buckets: (1) official
+// government, (2) wire services (Reuters/AP/Bloomberg/FT/BBC/NPR), (3)
+// national newspapers, (4) local news, (5) academic/think-tank, (6)
+// Wikipedia -- ranked lowest, background-only, never the primary source
+// when anything above it is available.
 export type SourceTier = "government" | "news" | "reference" | "general";
 
 const GOVERNMENT_DOMAINS = new Set([
   "who.int", "un.org", "imf.org", "worldbank.org", "federalreserve.gov", "congress.gov", "supremecourt.gov",
 ]);
-const NEWS_DOMAINS = new Set([
-  "apnews.com", "reuters.com", "npr.org", "pbs.org", "c-span.org", "nytimes.com", "washingtonpost.com",
-  "wsj.com", "bloomberg.com", "politico.com", "axios.com", "thehill.com", "usatoday.com", "cbsnews.com",
-  "nbcnews.com", "abcnews.go.com", "cnn.com", "foxnews.com",
+
+// Tier 2: wire services -- the most consistently authoritative, least
+// editorialized news sources, reported first and syndicated everywhere.
+const WIRE_SERVICE_DOMAINS = new Set([
+  "apnews.com", "reuters.com", "bloomberg.com", "ft.com", "bbc.com", "bbc.co.uk", "npr.org",
 ]);
+// Tier 3: national newspapers/broadcasters.
+const NATIONAL_NEWS_DOMAINS = new Set([
+  "nytimes.com", "washingtonpost.com", "wsj.com", "usatoday.com", "politico.com", "axios.com",
+  "thehill.com", "cbsnews.com", "nbcnews.com", "abcnews.go.com", "cnn.com", "foxnews.com", "pbs.org", "c-span.org",
+]);
+// Tier 4: known local news outlets (extend as specific markets come up --
+// anything ending in common local-station patterns still falls through to
+// the generic "news" bucket below via NEWS-shaped domain heuristics).
+const LOCAL_NEWS_DOMAINS = new Set(["wrex.com", "wifr.com", "rockfordregisterstar.com"]);
+
+const NEWS_DOMAINS = new Set([...WIRE_SERVICE_DOMAINS, ...NATIONAL_NEWS_DOMAINS, ...LOCAL_NEWS_DOMAINS]);
+
+// Tier 5: academic/reference/think-tank.
 const REFERENCE_DOMAINS = new Set(["ballotpedia.org", "opensecrets.org", "votesmart.org", "courtlistener.com"]);
+// Tier 6: Wikipedia -- background/fallback only, never primary when
+// anything above it exists.
+const WIKIPEDIA_DOMAINS = new Set(["wikipedia.org"]);
 
 const TIER_SORT_SCORE: Record<SourceTier, number> = { government: 4, news: 3, reference: 2, general: 1 };
 
-export function sourceTier(url: string): SourceTier {
-  let host: string;
+function bareHostOf(url: string): string | null {
   try {
-    host = new URL(url).hostname.toLowerCase();
+    const host = new URL(url).hostname.toLowerCase();
+    return host.startsWith("www.") ? host.slice(4) : host;
   } catch {
-    return "general";
+    return null;
   }
-  const bareHost = host.startsWith("www.") ? host.slice(4) : host;
+}
+
+export function isWikipedia(url: string): boolean {
+  const bareHost = bareHostOf(url);
+  return bareHost !== null && (bareHost === "wikipedia.org" || bareHost.endsWith(".wikipedia.org"));
+}
+
+export function sourceTier(url: string): SourceTier {
+  const bareHost = bareHostOf(url);
+  if (bareHost === null) return "general";
 
   if (GOVERNMENT_DOMAINS.has(bareHost)) return "government";
   if (NEWS_DOMAINS.has(bareHost)) return "news";
   if (REFERENCE_DOMAINS.has(bareHost)) return "reference";
-  if (host.endsWith(".gov") || host.endsWith(".mil")) return "government";
-  if (host.endsWith(".edu")) return "reference";
+  if (isWikipedia(url)) return "reference";
+  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return "government";
+  if (bareHost.endsWith(".edu")) return "reference";
   return "general";
 }
 
@@ -51,20 +85,18 @@ const AUTHORITY_RULES: [(host: string) => boolean, number][] = [
 ];
 
 export function sourceAuthorityRank(url: string): number {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return 0;
-  }
-  const bareHost = host.startsWith("www.") ? host.slice(4) : host;
+  const bareHost = bareHostOf(url);
+  if (bareHost === null) return 0;
 
   for (const [test, rank] of AUTHORITY_RULES) {
     if (test(bareHost)) return rank;
   }
-  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return 50; // other federal/state government
-  if (REFERENCE_DOMAINS.has(bareHost) || bareHost.endsWith(".edu")) return 30;
-  if (NEWS_DOMAINS.has(bareHost)) return 20;
+  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return 65; // other federal/state government
+  if (WIRE_SERVICE_DOMAINS.has(bareHost)) return 55;
+  if (NATIONAL_NEWS_DOMAINS.has(bareHost)) return 40;
+  if (LOCAL_NEWS_DOMAINS.has(bareHost)) return 30;
+  if (REFERENCE_DOMAINS.has(bareHost) || bareHost.endsWith(".edu")) return 20;
+  if (isWikipedia(url)) return 5; // background only -- never outranks a real primary source
   return 10;
 }
 
