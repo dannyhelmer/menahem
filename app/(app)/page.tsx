@@ -18,7 +18,7 @@ const RECENT_RESEARCH_LIMIT = 6;
 
 export default async function Home() {
   const user = await requireApprovedPageUser();
-  const [entities, needsApiKey] = await Promise.all([listAllEntities(), needsApiKeySetup(user.id)]);
+  const [entities, needsApiKey] = await Promise.all([listAllEntities(), needsApiKeySetup()]);
 
   const recentEntities = entities
     .filter((entity) => RECENT_RESEARCH_TYPES.has(entity.type))

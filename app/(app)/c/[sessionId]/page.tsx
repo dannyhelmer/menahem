@@ -31,7 +31,7 @@ export default async function ConversationPage({
 }) {
   const user = await requireApprovedPageUser();
   const { sessionId } = await params;
-  const [session, needsApiKey] = await Promise.all([loadSession(sessionId, user.id), needsApiKeySetup(user.id)]);
+  const [session, needsApiKey] = await Promise.all([loadSession(sessionId, user.id), needsApiKeySetup()]);
   if (!session) notFound();
 
   const initialMessages = session.messages.map((message, index) => ({

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireApprovedPageUser } from "@/lib/auth/session";
 import { getOwnerProfile } from "@/lib/settings/owner-profile";
 import AccountSection from "./_components/AccountSection";
-import AiProvidersSection from "./_components/AiProvidersSection";
+import AiProviderStatusSection from "./_components/AiProviderStatusSection";
 import GovernmentSourcesSection from "./_components/GovernmentSourcesSection";
 import SearchProvidersSection from "./_components/SearchProvidersSection";
 import ThemeSection from "./_components/ThemeSection";
@@ -47,7 +47,7 @@ export default async function SettingsPage() {
           </SettingsCard>
 
           <SettingsCard title="AI Providers">
-            <AiProvidersSection />
+            <AiProviderStatusSection />
           </SettingsCard>
 
           <SettingsCard title="Search Providers">

@@ -12,8 +12,16 @@ export const PROVIDER_REGISTRY: Record<string, ProviderFactory> = {
   anthropic: createAnthropicProvider,
 };
 
-// The order getProvider() checks a user's saved keys in when more than one
-// is configured.
+// The order getProvider() checks the server's configured env vars in when
+// more than one is set.
 export const PROVIDER_PRIORITY = ["openai", "anthropic"] as const;
 
 export type ProviderId = keyof typeof PROVIDER_REGISTRY;
+
+// Server-side-only credentials -- set once per deployment (Vercel env vars),
+// never per-user. Adding a new provider is one entry here plus one in
+// PROVIDER_REGISTRY/PROVIDER_PRIORITY above.
+export const PROVIDER_ENV_VARS: Record<ProviderId, string> = {
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+};

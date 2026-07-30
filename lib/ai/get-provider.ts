@@ -1,8 +1,7 @@
 import { isProductionDeployment } from "@/lib/env";
 import type { AIProvider } from "./provider";
 import { ollamaProvider } from "./ollama-provider";
-import { PROVIDER_PRIORITY, PROVIDER_REGISTRY } from "./providers/registry";
-import { getDecryptedUserApiKey } from "./user-api-keys";
+import { PROVIDER_ENV_VARS, PROVIDER_PRIORITY, PROVIDER_REGISTRY } from "./providers/registry";
 
 const unconfiguredProvider: AIProvider = {
   name: "cloud",
@@ -15,48 +14,52 @@ const unconfiguredProvider: AIProvider = {
   },
 };
 
-// Which provider a request should use is per-user in production (each
-// account brings their own key) but global in dev (Ollama, no account
-// needed). Async because production requires a DB round-trip to load and
-// decrypt the calling user's key. Checks PROVIDER_PRIORITY in order and
-// uses the first one the user has actually saved a key for.
+// AI provider credentials are server-side deployment config now (Vercel env
+// vars), never per-user -- every signed-in user shares the same configured
+// provider, exactly like ChatGPT or Perplexity. There is deliberately no
+// per-user key storage/lookup here anymore; `userId` is kept as a parameter
+// only because several callers still pass one through for unrelated reasons
+// (logging, owner-profile lookups elsewhere in the same request), not
+// because it affects which provider gets used.
 export async function getProvider(userId?: string): Promise<AIProvider> {
   if (!isProductionDeployment()) {
     console.log("[getProvider] non-production environment -> Ollama");
     return ollamaProvider;
   }
-  if (!userId) {
-    console.warn("[getProvider] called with no userId in production -> unconfigured");
-    return unconfiguredProvider;
-  }
 
   for (const providerId of PROVIDER_PRIORITY) {
-    console.log(`[getProvider] user ${userId}: checking for a saved "${providerId}" key`);
-    let apiKey: string | null;
-    try {
-      apiKey = await getDecryptedUserApiKey(userId, providerId);
-    } catch (error) {
-      console.error(`[getProvider] user ${userId}: failed to load/decrypt "${providerId}" key:`, error);
-      throw new Error(
-        `Could not read your ${providerId} API key (it may have been saved under a different encryption ` +
-          "key than this deployment currently has). Try clearing it and pasting it again in Settings.",
-      );
-    }
-
-    if (apiKey) {
-      console.log(`[getProvider] user ${userId}: using "${providerId}"`);
-      return PROVIDER_REGISTRY[providerId](apiKey);
+    const envVar = PROVIDER_ENV_VARS[providerId];
+    const apiKey = process.env[envVar];
+    if (apiKey && apiKey.trim()) {
+      console.log(`[getProvider] using "${providerId}" (from ${envVar})`);
+      return PROVIDER_REGISTRY[providerId](apiKey.trim());
     }
   }
 
-  console.log(`[getProvider] user ${userId}: no provider key configured for any of [${PROVIDER_PRIORITY.join(", ")}]`);
+  console.warn(
+    `[getProvider] no AI provider configured -- set one of [${PROVIDER_PRIORITY.map((p) => PROVIDER_ENV_VARS[p]).join(", ")}] in the deployment environment.` +
+      (userId ? ` (requested by user ${userId})` : ""),
+  );
   return unconfiguredProvider;
 }
 
-// Used by chat-surface pages to decide whether to show the "add an API
-// key" onboarding screen instead of the composer. Always false in dev
-// (Ollama needs no per-user setup).
-export async function needsApiKeySetup(userId: string): Promise<boolean> {
-  const provider = await getProvider(userId);
+// Used by chat-surface pages to decide whether to show the "AI isn't
+// configured yet" screen instead of the composer. Now reflects whether the
+// SERVER has a provider configured at all -- identical for every user,
+// never gated per-account.
+export async function needsApiKeySetup(): Promise<boolean> {
+  const provider = await getProvider();
   return !(await provider.isConfigured());
+}
+
+// For the read-only Settings status display -- which AI providers the
+// server currently has a credential for, in priority order. Never exposes
+// the credential itself.
+export function getConfiguredAiProviders(): { id: string; label: string; configured: boolean }[] {
+  const LABELS: Record<string, string> = { openai: "OpenAI", anthropic: "Claude (Anthropic)" };
+  return PROVIDER_PRIORITY.map((id) => ({
+    id,
+    label: LABELS[id] ?? id,
+    configured: Boolean(process.env[PROVIDER_ENV_VARS[id]]?.trim()),
+  }));
 }

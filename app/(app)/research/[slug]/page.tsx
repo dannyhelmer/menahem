@@ -26,7 +26,7 @@ export default async function ResearchCategoryPage({
   const category = getResearchCategory(slug);
   if (!category) notFound();
 
-  const [recentSearches, needsApiKey] = await Promise.all([listByCategory(user.id, slug), needsApiKeySetup(user.id)]);
+  const [recentSearches, needsApiKey] = await Promise.all([listByCategory(user.id, slug), needsApiKeySetup()]);
 
   return <ResearchWorkspace category={category} recentSearches={recentSearches} needsApiKey={needsApiKey} />;
 }
