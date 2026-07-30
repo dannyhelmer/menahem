@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireApprovedPageUser } from "@/lib/auth/session";
 import { listAllEntities } from "@/lib/graph/store";
 import { humanize } from "@/lib/graph/humanize";
 import type { EntityType, GraphEntity } from "@/lib/graph/types";
@@ -14,6 +15,7 @@ function groupByType(entities: GraphEntity[]): [EntityType, GraphEntity[]][] {
 }
 
 export default async function WorkspaceEntitiesPage() {
+  await requireApprovedPageUser();
   const entities = await listAllEntities();
   const groups = groupByType(entities);
 

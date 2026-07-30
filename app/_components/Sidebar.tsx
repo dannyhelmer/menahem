@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import type { ConversationSummary } from "@/lib/memory/types";
 import type { OwnerProfile } from "@/lib/settings/owner-profile";
 import { useConversationsRefresh } from "./ConversationsProvider";
-import { PlusIcon, SearchIcon, WorkspaceIcon } from "./icons";
+import { AdminIcon, PlusIcon, SearchIcon, SignOutIcon, WorkspaceIcon } from "./icons";
 import SidebarConversationItem from "./SidebarConversationItem";
 
 function SidebarSection({ title, items }: { title: string; items: ConversationSummary[] }) {
@@ -32,6 +32,7 @@ export default function Sidebar() {
   const [pinned, setPinned] = useState<ConversationSummary[]>([]);
   const [recent, setRecent] = useState<ConversationSummary[]>([]);
   const [profile, setProfile] = useState<OwnerProfile | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -48,6 +49,18 @@ export default function Sidebar() {
       .then((res) => res.json())
       .then(setProfile);
   }, [version]);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data: { user: { isAdmin: boolean } | null }) => setIsAdmin(data.user?.isAdmin ?? false));
+  }, []);
+
+  async function handleSignOut() {
+    await fetch("/api/auth/signout", { method: "POST" });
+    router.push("/signin");
+    router.refresh();
+  }
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredPinned = normalizedQuery
@@ -90,6 +103,18 @@ export default function Sidebar() {
         </Link>
       </div>
 
+      {isAdmin && (
+        <div className="mt-2 px-4">
+          <Link
+            href="/admin"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-300 dark:hover:border-neutral-700 dark:hover:text-neutral-50"
+          >
+            <AdminIcon />
+            Admin
+          </Link>
+        </div>
+      )}
+
       <div className="mt-4 px-4">
         <div className="focus-within:border-burgundy/40 flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-neutral-400 transition-colors dark:border-neutral-800 dark:bg-neutral-900">
           <SearchIcon />
@@ -109,20 +134,29 @@ export default function Sidebar() {
       </nav>
 
       <div className="border-t border-neutral-200 px-3 py-3 dark:border-neutral-800">
-        <Link
-          href="/settings"
-          className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors duration-150 hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60"
-        >
-          <div className="bg-burgundy/10 text-burgundy dark:bg-burgundy/20 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold">
-            {(profile?.preferredName ?? "?").charAt(0).toUpperCase()}
-          </div>
-          <div className="flex min-w-0 flex-col">
-            <span className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
-              {profile?.preferredName ?? "…"}
-            </span>
-            <span className="text-xs text-neutral-400 dark:text-neutral-500">Settings</span>
-          </div>
-        </Link>
+        <div className="flex items-center gap-1">
+          <Link
+            href="/settings"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors duration-150 hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60"
+          >
+            <div className="bg-burgundy/10 text-burgundy dark:bg-burgundy/20 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold">
+              {(profile?.preferredName ?? "?").charAt(0).toUpperCase()}
+            </div>
+            <div className="flex min-w-0 flex-col">
+              <span className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                {profile?.preferredName ?? "…"}
+              </span>
+              <span className="text-xs text-neutral-400 dark:text-neutral-500">Settings</span>
+            </div>
+          </Link>
+          <button
+            onClick={handleSignOut}
+            aria-label="Sign out"
+            className="shrink-0 rounded-lg p-2 text-neutral-400 hover:text-red-600"
+          >
+            <SignOutIcon />
+          </button>
+        </div>
       </div>
     </aside>
   );

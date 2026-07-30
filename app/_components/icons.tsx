@@ -15,6 +15,8 @@ import {
   Trash2,
   Link2,
   Share2,
+  LogOut,
+  ShieldCheck,
 } from "lucide-react";
 
 export function SendIcon() {
@@ -59,4 +61,12 @@ export function LinkIcon() {
 
 export function WorkspaceIcon() {
   return <Share2 className="h-4 w-4 shrink-0" aria-hidden="true" />;
+}
+
+export function SignOutIcon() {
+  return <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />;
+}
+
+export function AdminIcon() {
+  return <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />;
 }

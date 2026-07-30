@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import AddToProjectButton from "@/app/_components/AddToProjectButton";
+import { requireApprovedPageUser } from "@/lib/auth/session";
 import { getConnectedEntities, getEntity } from "@/lib/graph/store";
 import { humanize } from "@/lib/graph/humanize";
 import { getTimeline } from "@/lib/timeline/store";
@@ -28,6 +29,7 @@ export default async function WorkspaceEntityPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireApprovedPageUser();
   const { id } = await params;
   const entityId = decodeURIComponent(id);
 

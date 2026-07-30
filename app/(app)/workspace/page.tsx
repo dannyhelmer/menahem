@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { requireApprovedPageUser } from "@/lib/auth/session";
 import { listProjects } from "@/lib/notebook/store";
 import CreateProjectForm from "@/app/_components/CreateProjectForm";
 import ProjectListItem from "@/app/_components/ProjectListItem";
 
 export default async function WorkspacePage() {
+  await requireApprovedPageUser();
   const projects = await listProjects();
 
   return (

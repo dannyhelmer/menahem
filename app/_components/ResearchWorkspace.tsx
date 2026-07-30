@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import type { ConversationSummary } from "@/lib/memory/types";
 import type { ResearchCategoryConfig } from "@/lib/research-categories/config";
+import ApiKeyOnboarding from "./ApiKeyOnboarding";
 import ChatDisclaimer from "./ChatDisclaimer";
 import ConversationThread from "./ConversationThread";
 import PromptInput from "./PromptInput";
@@ -13,9 +14,11 @@ import { useChatSession } from "./useChatSession";
 export default function ResearchWorkspace({
   category,
   recentSearches,
+  needsApiKey = false,
 }: {
   category: ResearchCategoryConfig;
   recentSearches: ConversationSummary[];
+  needsApiKey?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const {
@@ -35,6 +38,10 @@ export default function ResearchWorkspace({
   function handleSubmit() {
     sendMessage(draft);
     setDraft("");
+  }
+
+  if (needsApiKey) {
+    return <ApiKeyOnboarding />;
   }
 
   if (messages.length > 0) {
