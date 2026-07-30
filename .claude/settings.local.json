@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npm install react-markdown remark-gfm)",
+      "PowerShell(npm install node-html-parser)",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1)",
+      "PowerShell(npx next typegen 2>&1)",
+      "Read(//c/Users/Danny/OneDrive/Desktop/Menahem AI/**)",
+      "PowerShell(Get-Command magick -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command convert -ErrorAction SilentlyContinue)",
+      "PowerShell(python --version 2>$null)",
+      "PowerShell(Get-Command python -ErrorAction SilentlyContinue)",
+      "PowerShell(python -c \"import PIL; print\\(PIL.__version__\\)\" 2>&1)",
+      "PowerShell(python -c \"from PIL import Image; im = Image.open\\(r'c:\\\\Users\\\\Danny\\\\Documents\\\\Projects\\\\menahem-web\\\\app\\\\favicon.ico'\\); print\\(im.size, im.format\\)\")",
+      "PowerShell(Move-Item \"c:\\\\Users\\\\Danny\\\\Documents\\\\Projects\\\\menahem-web\\\\menahemlogo.ico\" \"c:\\\\Users\\\\Danny\\\\Documents\\\\Projects\\\\menahem-web\\\\app\\\\favicon.ico\" -Force)",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npm install lucide-react)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Danny\\OneDrive\\Desktop\\Menahem AI"
+    ]
+  }
+}
