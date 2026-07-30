@@ -1,6 +1,11 @@
+import type { Metadata } from "next";
 import LegalPageLayout, { LegalSection } from "@/app/_components/LegalPageLayout";
 
-export const metadata = { title: "Terms of Service | Menahem" };
+export const metadata: Metadata = {
+  title: "Terms of Service",
+  description: "The terms governing use of Menahem's private beta.",
+  alternates: { canonical: "/terms" },
+};
 
 export default function TermsOfServicePage() {
   return (

@@ -94,8 +94,7 @@ export default function Dashboard({
             Government Intelligence Platform
           </h1>
           <p className="mx-auto max-w-2xl text-lg text-neutral-500 dark:text-neutral-400">
-            Research legislation, court opinions, budgets, elections, constitutions, agencies, and official
-            government documents using AI powered by authoritative sources.
+            AI-powered research for legislation, public policy, and official government sources.
           </p>
         </div>
 

@@ -45,5 +45,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Crawler-facing well-known files must never require a session -- Next's
+  // own docs list exactly this set as the standard exclusion pattern.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|opengraph-image|manifest.webmanifest).*)",
+  ],
 };
