@@ -1,6 +1,6 @@
 import type { AIProvider } from "./provider";
 import { ollamaProvider } from "./ollama-provider";
-import { PROVIDER_REGISTRY } from "./providers/registry";
+import { PROVIDER_PRIORITY, PROVIDER_REGISTRY } from "./providers/registry";
 import { getDecryptedUserApiKey } from "./user-api-keys";
 
 // Ollama only exists on the developer's own machine -- it must never be
@@ -24,15 +24,39 @@ const unconfiguredProvider: AIProvider = {
 // Which provider a request should use is per-user in production (each
 // account brings their own key) but global in dev (Ollama, no account
 // needed). Async because production requires a DB round-trip to load and
-// decrypt the calling user's key.
+// decrypt the calling user's key. Checks PROVIDER_PRIORITY in order and
+// uses the first one the user has actually saved a key for.
 export async function getProvider(userId?: string): Promise<AIProvider> {
-  if (!isProductionDeployment()) return ollamaProvider;
-  if (!userId) return unconfiguredProvider;
+  if (!isProductionDeployment()) {
+    console.log("[getProvider] non-production environment -> Ollama");
+    return ollamaProvider;
+  }
+  if (!userId) {
+    console.warn("[getProvider] called with no userId in production -> unconfigured");
+    return unconfiguredProvider;
+  }
 
-  const apiKey = await getDecryptedUserApiKey(userId, "openai");
-  if (!apiKey) return unconfiguredProvider;
+  for (const providerId of PROVIDER_PRIORITY) {
+    console.log(`[getProvider] user ${userId}: checking for a saved "${providerId}" key`);
+    let apiKey: string | null;
+    try {
+      apiKey = await getDecryptedUserApiKey(userId, providerId);
+    } catch (error) {
+      console.error(`[getProvider] user ${userId}: failed to load/decrypt "${providerId}" key:`, error);
+      throw new Error(
+        `Could not read your ${providerId} API key (it may have been saved under a different encryption ` +
+          "key than this deployment currently has). Try clearing it and pasting it again in Settings.",
+      );
+    }
 
-  return PROVIDER_REGISTRY.openai(apiKey);
+    if (apiKey) {
+      console.log(`[getProvider] user ${userId}: using "${providerId}"`);
+      return PROVIDER_REGISTRY[providerId](apiKey);
+    }
+  }
+
+  console.log(`[getProvider] user ${userId}: no provider key configured for any of [${PROVIDER_PRIORITY.join(", ")}]`);
+  return unconfiguredProvider;
 }
 
 // Used by chat-surface pages to decide whether to show the "add an API

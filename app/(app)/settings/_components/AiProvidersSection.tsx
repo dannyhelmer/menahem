@@ -43,7 +43,7 @@ function ProviderKeyRow({ providerId, label }: { providerId: string; label: stri
       <div className="w-32 shrink-0 text-sm text-neutral-700 dark:text-neutral-300">{label}</div>
       {status?.configured ? (
         <>
-          <span className="flex-1 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 font-mono text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">
+          <span className="min-w-0 flex-1 truncate rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 font-mono text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">
             {status.masked}
           </span>
           <button
@@ -83,9 +83,10 @@ export default function AiProvidersSection() {
     <div className="space-y-4">
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
         Add your own API key for the AI provider Menahem should use to answer your questions. Your key is
-        encrypted at rest and never shared with other accounts.
+        encrypted at rest and never shared with other accounts. If both are configured, OpenAI is used first.
       </p>
       <ProviderKeyRow providerId="openai" label="OpenAI" />
+      <ProviderKeyRow providerId="anthropic" label="Claude (Anthropic)" />
     </div>
   );
 }

@@ -22,8 +22,14 @@ export async function getDecryptedUserApiKey(userId: string, provider: string): 
   const rows = await sql`
     SELECT encrypted_key FROM user_api_keys WHERE user_id = ${userId} AND provider = ${provider}
   `;
-  if (!rows[0]) return null;
-  return decrypt(rows[0].encrypted_key as string);
+  if (!rows[0]) {
+    console.log(`[user-api-keys] no "${provider}" row in DB for user ${userId}`);
+    return null;
+  }
+  console.log(`[user-api-keys] found "${provider}" row for user ${userId}, decrypting`);
+  const decrypted = decrypt(rows[0].encrypted_key as string);
+  console.log(`[user-api-keys] decrypted "${provider}" key for user ${userId}, length=${decrypted.length}`);
+  return decrypted;
 }
 
 export async function hasConfiguredApiKey(userId: string, provider: string): Promise<boolean> {

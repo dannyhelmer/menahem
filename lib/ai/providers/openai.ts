@@ -32,6 +32,7 @@ export function createOpenAIProvider(apiKey: string): AIProvider {
       onChunk: (piece: string) => void,
       options?: StreamChatOptions,
     ): Promise<StreamChatResult> {
+      console.log(`[openai] POST ${OPENAI_RESPONSES_URL} model=${DEFAULT_MODEL} messages=${messages.length}`);
       const response = await fetch(OPENAI_RESPONSES_URL, {
         method: "POST",
         headers: {
@@ -46,9 +47,11 @@ export function createOpenAIProvider(apiKey: string): AIProvider {
           max_output_tokens: options?.maxTokens ?? DEFAULT_MAX_TOKENS,
         }),
       });
+      console.log(`[openai] response status: ${response.status}`);
 
       if (!response.ok || !response.body) {
         const body = await response.text().catch(() => "");
+        console.error(`[openai] request failed (${response.status}):`, body);
         throw new Error(`OpenAI request failed (${response.status}): ${body || response.statusText}`);
       }
 
