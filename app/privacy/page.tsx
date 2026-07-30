@@ -1,6 +1,11 @@
+import type { Metadata } from "next";
 import LegalPageLayout, { LegalSection } from "@/app/_components/LegalPageLayout";
 
-export const metadata = { title: "Privacy Policy | Menahem" };
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description: "How Menahem collects, uses, and protects your account and research information.",
+  alternates: { canonical: "/privacy" },
+};
 
 export default function PrivacyPolicyPage() {
   return (
