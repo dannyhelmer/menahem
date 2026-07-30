@@ -167,7 +167,17 @@ export function useChatSession({
     const trimmed = content.trim();
     if (!trimmed || status === "streaming") return;
 
-    const history: ChatMessage[] = [...messages, { role: "user", content: trimmed }];
+    // messages is UiMessage[] (id, sources, confidence, etc. beyond role/
+    // content) -- spreading those objects as-is would serialize the extra
+    // fields into the request body too, including our own internal `id`.
+    // OpenAI's Responses API interprets a present `id` on an input item as
+    // a reference to one of ITS OWN "msg_*"-prefixed items and rejects
+    // anything else, so every provider gets a plain {role, content} replay
+    // of history, never our internal identifiers.
+    const history: ChatMessage[] = [
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+      { role: "user", content: trimmed },
+    ];
     const assistantId = createId();
 
     setMessages((prev) => [

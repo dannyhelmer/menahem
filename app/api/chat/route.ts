@@ -307,7 +307,7 @@ async function routeMessage(
 
 export const POST = withAuth(async (request, _ctx, user) => {
   const {
-    messages,
+    messages: rawMessages,
     sessionId: requestedSessionId,
     webSearchEnabled,
     deepResearchEnabled,
@@ -324,9 +324,18 @@ export const POST = withAuth(async (request, _ctx, user) => {
     continuation?: boolean;
   };
 
-  if (!Array.isArray(messages) || messages.length === 0) {
+  if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
     return Response.json({ error: "No messages provided." }, { status: 400 });
   }
+
+  // Defense in depth -- never trust extra fields (id, sources, confidence,
+  // etc.) a client might send alongside role/content. This is what
+  // actually matters for OpenAI's Responses API, which treats a present
+  // `id` field on an input item as a reference to one of ITS OWN
+  // "msg_*"-prefixed items and rejects anything else -- every provider
+  // gets a plain {role, content} replay of history, never our own
+  // internal message ids.
+  const messages: ChatMessage[] = rawMessages.map((m) => ({ role: m.role, content: m.content }));
 
   // requireApprovedUser() (inside withAuth) already confirmed this account
   // is authenticated and approved -- this is the separate, AI-specific
