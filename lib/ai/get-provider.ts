@@ -1,14 +1,8 @@
+import { isProductionDeployment } from "@/lib/env";
 import type { AIProvider } from "./provider";
 import { ollamaProvider } from "./ollama-provider";
 import { PROVIDER_PRIORITY, PROVIDER_REGISTRY } from "./providers/registry";
 import { getDecryptedUserApiKey } from "./user-api-keys";
-
-// Ollama only exists on the developer's own machine -- it must never be
-// reached from a deployed instance. Vercel sets VERCEL=1 on every
-// deployment; NODE_ENV=production covers any other production build.
-function isProductionDeployment(): boolean {
-  return process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
-}
 
 const unconfiguredProvider: AIProvider = {
   name: "cloud",

@@ -1,7 +1,18 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { isProductionDeployment } from "@/lib/env";
 
-export const DATA_DIR = path.join(process.cwd(), "data");
+// Vercel's deployment filesystem is read-only outside /tmp (writing under
+// process.cwd() there throws ENOENT trying to create the directory at
+// all) -- /tmp IS writable but ephemeral, not shared across instances, and
+// wiped on cold start. This stops the immediate crash so chat/documents/etc.
+// actually work, but it's a stopgap: this data won't reliably survive
+// between requests in production until it moves to Postgres, the same way
+// auth/AI provider keys already did.
+export const DATA_DIR = isProductionDeployment()
+  ? path.join(os.tmpdir(), "menahem-data")
+  : path.join(process.cwd(), "data");
 
 export async function ensureDir(dirPath: string): Promise<void> {
   await mkdir(dirPath, { recursive: true });
