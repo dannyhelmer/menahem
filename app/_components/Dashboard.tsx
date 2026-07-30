@@ -17,24 +17,18 @@ const RECENT_ENTITY_TYPE_LABELS: Record<string, string> = {
 };
 
 const EXAMPLE_PROMPTS = [
-  "What is H.R. 1 and what does it do?",
-  "Who represents Illinois Senate District 34?",
-  "What does the Commerce Clause mean?",
-  "Who is running for Rockford mayor?",
-  "What are the latest Supreme Court decisions?",
-  "How does the federal budget process work?",
-  "What does the EPA regulate?",
-  "What is the current status of H.R. 1?",
-  "Who sponsored H.R. 1?",
-  "What powers does the Tenth Amendment reserve to the states?",
-  "How does Congress pass a bill?",
-  "What is the Federal Register?",
-  "What does the Department of Education do?",
-  "What is the latest executive order on AI?",
-  "How are vacancies filled in the Illinois House?",
-  "What is the Congressional Budget Office?",
+  "What executive orders has the current administration signed this month?",
+  "Summarize the latest Supreme Court decisions.",
+  "Compare the tax policies of the major parties.",
+  "What are the biggest political stories today?",
+  "Explain the conflict in the South China Sea.",
+  "Track the progress of a bill through Congress.",
+  "Who has announced a campaign for the 2028 presidential election?",
+  "Compare the budgets of all 50 states.",
   "How does the Electoral College work?",
-  "What are the powers of the Illinois governor?",
+  "Summarize the latest developments in U.S.–China relations.",
+  "What are the major issues in the upcoming election?",
+  "Explain NATO's role in Europe.",
 ];
 
 const CAPABILITIES = [

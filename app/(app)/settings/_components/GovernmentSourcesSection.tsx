@@ -86,7 +86,7 @@ const PLANNED_PROVIDER_LABELS = [
 
 export default function GovernmentSourcesSection() {
   return (
-    <div className="max-w-lg space-y-4">
+    <div className="space-y-4">
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
         These power Menahem&apos;s political research pipeline -- official bill text, sponsors, and
         campaign finance records instead of just general web search. Both are free to sign up for.

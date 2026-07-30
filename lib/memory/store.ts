@@ -1,6 +1,7 @@
 import path from "node:path";
 import { unlink } from "node:fs/promises";
 import { DATA_DIR, readJsonFile, writeJsonFileAtomic } from "@/lib/storage/json-file";
+import { FALLBACK_TITLE } from "./title";
 import type { ConversationSession, ConversationSummary, StoredMessage } from "./types";
 
 const CONVERSATIONS_DIR = path.join(DATA_DIR, "conversations");
@@ -70,7 +71,7 @@ export async function appendMessage(
       date: now.toISOString().slice(0, 10),
       startTime: now.toISOString(),
       endTime: null,
-      title: "New conversation",
+      title: FALLBACK_TITLE,
       messages: [],
       category,
     };

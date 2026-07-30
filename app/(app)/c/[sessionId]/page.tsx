@@ -1,8 +1,26 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import ChatView from "@/app/_components/ChatView";
 import { needsApiKeySetup } from "@/lib/ai/get-provider";
 import { requireApprovedPageUser } from "@/lib/auth/session";
+import { FALLBACK_TITLE } from "@/lib/memory/title";
 import { loadSession } from "@/lib/memory/store";
+
+// A conversation's title arrives asynchronously (generated after the first
+// reply) -- this covers direct navigation/reload; the in-app transition
+// from a brand-new chat to its generated title happens without a page
+// navigation at all, so useChatSession.ts also syncs document.title
+// directly once that title shows up.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ sessionId: string }>;
+}): Promise<Metadata> {
+  const { sessionId } = await params;
+  const session = await loadSession(sessionId);
+  if (!session || session.title === FALLBACK_TITLE) return { title: { absolute: "Menahem" } };
+  return { title: session.title };
+}
 
 export default async function ConversationPage({
   params,

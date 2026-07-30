@@ -80,7 +80,7 @@ function ProviderKeyRow({ providerId, label }: { providerId: string; label: stri
 
 export default function AiProvidersSection() {
   return (
-    <div className="max-w-lg space-y-4">
+    <div className="space-y-4">
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
         Add your own API key for the AI provider Menahem should use to answer your questions. Your key is
         encrypted at rest and never shared with other accounts.

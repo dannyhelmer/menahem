@@ -80,7 +80,7 @@ function ProviderKeyRow({ providerId, label }: { providerId: string; label: stri
 
 export default function SearchProvidersSection() {
   return (
-    <div className="max-w-lg space-y-4">
+    <div className="space-y-4">
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
         Add your own API key for any provider you want Menahem to search with. None of these are
         required to use Menahem, but web search stays unavailable until at least one is configured.

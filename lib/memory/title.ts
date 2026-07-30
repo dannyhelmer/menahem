@@ -1,7 +1,7 @@
 import { getProvider } from "@/lib/ai/get-provider";
 import type { StoredMessage } from "./types";
 
-const FALLBACK_TITLE = "New conversation";
+export const FALLBACK_TITLE = "New conversation";
 const MAX_TITLE_LENGTH = 80;
 
 export async function generateTitle(messages: StoredMessage[], userId?: string): Promise<string> {

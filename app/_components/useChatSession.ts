@@ -9,6 +9,24 @@ function createId(): string {
   return crypto.randomUUID();
 }
 
+// The session's real title is generated asynchronously on the server after
+// the first reply (see route.ts's `after()` hook) -- there's no push
+// mechanism, so this re-fetches shortly after a stream ends to pick it up
+// and update the browser tab, since transitioning from a brand-new chat to
+// its generated title happens via history.replaceState (below), not a real
+// Next.js navigation, so generateMetadata never gets a chance to run for it.
+async function syncDocumentTitle(sessionId: string) {
+  try {
+    const response = await fetch(`/api/conversations/${sessionId}`);
+    if (!response.ok) return;
+    const session = (await response.json()) as { title?: string };
+    if (!session.title) return;
+    document.title = session.title === "New conversation" ? "Menahem" : `${session.title} | Menahem`;
+  } catch {
+    // Non-critical -- leave whatever title is currently showing.
+  }
+}
+
 const CONTINUE_INSTRUCTION =
   "Continue your previous answer exactly where it left off. Do not repeat, restate, or summarize anything " +
   "you've already written -- continue seamlessly as if uninterrupted, with no new greeting or preamble.";
@@ -215,7 +233,11 @@ export function useChatSession({
       // The session title is generated asynchronously after the stream
       // closes -- one extra refresh a couple seconds later is a cheap way
       // to pick it up without a push-based mechanism.
-      setTimeout(refresh, 2500);
+      const currentSessionId = sessionIdRef.current;
+      setTimeout(() => {
+        refresh();
+        if (currentSessionId) syncDocumentTitle(currentSessionId);
+      }, 2500);
     }
   }
 
