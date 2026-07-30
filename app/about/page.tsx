@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import LegalPageLayout, { LegalSection } from "@/app/_components/LegalPageLayout";
 
 export const metadata: Metadata = {
@@ -61,6 +62,18 @@ export default function AboutPage() {
         <p>
           AI-generated responses may contain mistakes. Users should verify important information using official
           government sources.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="Legal">
+        <p>
+          <Link href="/privacy" className="text-burgundy hover:underline">
+            Privacy Policy
+          </Link>
+          {" · "}
+          <Link href="/terms" className="text-burgundy hover:underline">
+            Terms of Service
+          </Link>
         </p>
       </LegalSection>
     </LegalPageLayout>
