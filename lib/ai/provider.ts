@@ -18,6 +18,10 @@ export interface StreamChatResult {
 
 export interface AIProvider {
   readonly name: string;
+  // Human-readable description of the active backend, surfaced in the
+  // system prompt so Menahem can truthfully answer "what model are you
+  // running on" regardless of which provider is actually active.
+  readonly description: string;
   isConfigured(): Promise<boolean>;
   streamChat(
     messages: ChatMessage[],

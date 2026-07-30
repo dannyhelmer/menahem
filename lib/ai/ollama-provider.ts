@@ -23,6 +23,7 @@ interface OllamaChatChunk {
 
 class OllamaProvider implements AIProvider {
   readonly name = "ollama";
+  readonly description = "Qwen, running locally through Ollama";
 
   async isConfigured(): Promise<boolean> {
     try {

@@ -9,10 +9,14 @@ export interface OwnerProfile {
   isOwner: boolean;
 }
 
+// Falls back to this whenever no profile has been saved for this
+// deployment (data/owner-profile.json is gitignored, so a fresh production
+// deployment always starts here) -- public visitors must never be
+// defaulted to the developer's own name.
 const DEFAULT_OWNER_PROFILE: OwnerProfile = {
-  name: "Daniel Helmer",
-  preferredName: "Danny",
-  isOwner: true,
+  name: "Guest",
+  preferredName: "Guest",
+  isOwner: false,
 };
 
 export async function getOwnerProfile(): Promise<OwnerProfile> {

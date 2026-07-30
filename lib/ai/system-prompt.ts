@@ -1,3 +1,4 @@
+import { getProvider } from "./get-provider";
 import { getOwnerProfile } from "@/lib/settings/owner-profile";
 
 // Ported verbatim from the Python desktop app's core/prompts.py
@@ -323,8 +324,6 @@ Incorrect -- never do this:
 - Refusing to evaluate a user's own budget math ("I can't say whether that's balanced, it depends on your politics") when the numbers themselves simply don't add up.
 - Repeating "I'm an AI and don't have opinions" on every political question instead of just answering neutrally.`;
 
-const ACTIVE_MODEL_INFO = "Qwen, running locally through Ollama";
-
 function formatRuntimeContext(): string {
   const now = new Date();
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -358,7 +357,7 @@ export async function buildSystemPrompt(liveData?: string): Promise<string> {
 
   const parts = [
     BASE_SYSTEM_PROMPT,
-    `Currently running on: ${ACTIVE_MODEL_INFO}.`,
+    `Currently running on: ${getProvider().description}.`,
     formatRuntimeContext(),
     ownerBlock,
   ];

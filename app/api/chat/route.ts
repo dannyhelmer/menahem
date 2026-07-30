@@ -328,13 +328,11 @@ export async function POST(request: Request) {
 
   const provider = getProvider();
   if (!(await provider.isConfigured())) {
-    return Response.json(
-      {
-        error:
-          "Menahem's local model isn't available right now. Make sure Ollama is running and qwen3:8b is pulled.",
-      },
-      { status: 503 },
-    );
+    const error =
+      provider.name === "cloud"
+        ? "No cloud AI provider is configured for this deployment."
+        : "Menahem's local model isn't available right now. Make sure Ollama is running and qwen3:8b is pulled.";
+    return Response.json({ error }, { status: 503 });
   }
 
   const sessionId =
