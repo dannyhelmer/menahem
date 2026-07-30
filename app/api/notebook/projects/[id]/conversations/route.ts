@@ -1,9 +1,10 @@
+import { withAuth } from "@/lib/auth/with-auth";
 import { isValidSessionId } from "@/lib/memory/store";
 import { addConversationToProject } from "@/lib/notebook/store";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export const POST = withAuth(async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const body = (await request.json()) as { sessionId?: string };
   if (!body.sessionId || !isValidSessionId(body.sessionId)) {
@@ -12,4 +13,4 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   await addConversationToProject(id, body.sessionId);
   return Response.json({ ok: true });
-}
+});

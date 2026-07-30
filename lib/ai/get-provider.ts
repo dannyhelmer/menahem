@@ -34,3 +34,11 @@ export async function getProvider(userId?: string): Promise<AIProvider> {
 
   return PROVIDER_REGISTRY.openai(apiKey);
 }
+
+// Used by chat-surface pages to decide whether to show the "add an API
+// key" onboarding screen instead of the composer. Always false in dev
+// (Ollama needs no per-user setup).
+export async function needsApiKeySetup(userId: string): Promise<boolean> {
+  const provider = await getProvider(userId);
+  return !(await provider.isConfigured());
+}

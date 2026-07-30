@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import ChatView from "@/app/_components/ChatView";
+import { needsApiKeySetup } from "@/lib/ai/get-provider";
+import { requireApprovedPageUser } from "@/lib/auth/session";
 import { loadSession } from "@/lib/memory/store";
 
 export default async function ConversationPage({
@@ -7,8 +9,9 @@ export default async function ConversationPage({
 }: {
   params: Promise<{ sessionId: string }>;
 }) {
+  const user = await requireApprovedPageUser();
   const { sessionId } = await params;
-  const session = await loadSession(sessionId);
+  const [session, needsApiKey] = await Promise.all([loadSession(sessionId), needsApiKeySetup(user.id)]);
   if (!session) notFound();
 
   const initialMessages = session.messages.map((message, index) => ({
@@ -21,5 +24,12 @@ export default async function ConversationPage({
     truncated: message.truncated,
   }));
 
-  return <ChatView key={sessionId} initialSessionId={sessionId} initialMessages={initialMessages} />;
+  return (
+    <ChatView
+      key={sessionId}
+      initialSessionId={sessionId}
+      initialMessages={initialMessages}
+      needsApiKey={needsApiKey}
+    />
+  );
 }

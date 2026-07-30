@@ -1,8 +1,9 @@
+import { withAuth } from "@/lib/auth/with-auth";
 import { getDocument, getDocumentFile } from "@/lib/documents/store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withAuth(async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const [document, file] = await Promise.all([getDocument(id), getDocumentFile(id)]);
   if (!document || !file) return Response.json({ error: "Not found." }, { status: 404 });
@@ -13,4 +14,4 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       "Content-Disposition": `inline; filename="${document.filename.replace(/"/g, "")}"`,
     },
   });
-}
+});

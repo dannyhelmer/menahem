@@ -1,8 +1,9 @@
+import { withAuth } from "@/lib/auth/with-auth";
 import { addCitation } from "@/lib/notebook/store";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export const POST = withAuth(async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const body = (await request.json()) as { title?: string; url?: string };
   const title = body.title?.trim();
@@ -12,4 +13,4 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const citation = await addCitation(id, title, url);
   if (!citation) return Response.json({ error: "Not found." }, { status: 404 });
   return Response.json(citation);
-}
+});

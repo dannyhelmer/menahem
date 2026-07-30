@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { GraphEntity } from "@/lib/graph/types";
+import ApiKeyOnboarding from "./ApiKeyOnboarding";
 import ConversationThread from "./ConversationThread";
 import Dashboard from "./Dashboard";
 import type { UiMessage } from "./chat-types";
@@ -11,10 +12,12 @@ export default function ChatView({
   initialSessionId,
   initialMessages,
   recentEntities = [],
+  needsApiKey = false,
 }: {
   initialSessionId?: string;
   initialMessages?: UiMessage[];
   recentEntities?: GraphEntity[];
+  needsApiKey?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const {
@@ -32,6 +35,10 @@ export default function ChatView({
   function handleSubmit() {
     sendMessage(draft);
     setDraft("");
+  }
+
+  if (needsApiKey) {
+    return <ApiKeyOnboarding />;
   }
 
   if (messages.length === 0) {
