@@ -1,8 +1,6 @@
-import path from "node:path";
-import { DATA_DIR, readJsonFile, writeJsonFileAtomic } from "@/lib/storage/json-file";
+import { ensureSchema } from "@/lib/db/schema";
+import { sql } from "@/lib/db/client";
 import { API_KEY_PROVIDERS, type ApiKeyProviderDef } from "./api-key-providers";
-
-const API_KEYS_PATH = path.join(DATA_DIR, "api-keys.json");
 
 interface StoredApiKey {
   value: string;
@@ -11,8 +9,25 @@ interface StoredApiKey {
 
 type ApiKeysRecord = Record<string, StoredApiKey>;
 
+// These are app-wide (not per-user) search/gov-data provider keys -- was
+// JSON-file-backed under DATA_DIR, which on Vercel is ephemeral os.tmpdir()
+// (wiped on cold start, never shared across instances). Stored in the same
+// app_settings table lib/settings/store.ts uses, under one fixed key, so a
+// saved key actually survives a refresh instead of silently vanishing.
+const SETTINGS_KEY = "api-keys";
+
 async function loadKeys(): Promise<ApiKeysRecord> {
-  return readJsonFile<ApiKeysRecord>(API_KEYS_PATH, {});
+  await ensureSchema();
+  const rows = (await sql`SELECT value FROM app_settings WHERE key = ${SETTINGS_KEY}`) as { value: ApiKeysRecord }[];
+  return rows[0]?.value ?? {};
+}
+
+async function saveKeys(keys: ApiKeysRecord): Promise<void> {
+  await ensureSchema();
+  await sql`
+    INSERT INTO app_settings (key, value) VALUES (${SETTINGS_KEY}, ${JSON.stringify(keys)})
+    ON CONFLICT (key) DO UPDATE SET value = ${JSON.stringify(keys)}, updated_at = now()
+  `;
 }
 
 function findProvider(providerId: string): ApiKeyProviderDef {
@@ -46,11 +61,11 @@ export async function saveApiKey(providerId: string, rawValue: string): Promise<
   findProvider(providerId);
   const keys = await loadKeys();
   keys[providerId] = { value: rawValue.trim(), updatedAt: new Date().toISOString() };
-  await writeJsonFileAtomic(API_KEYS_PATH, keys);
+  await saveKeys(keys);
 }
 
 export async function clearApiKey(providerId: string): Promise<void> {
   const keys = await loadKeys();
   delete keys[providerId];
-  await writeJsonFileAtomic(API_KEYS_PATH, keys);
+  await saveKeys(keys);
 }

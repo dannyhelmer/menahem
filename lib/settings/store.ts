@@ -1,25 +1,21 @@
-import path from "node:path";
-import { DATA_DIR, readJsonFile, writeJsonFileAtomic } from "@/lib/storage/json-file";
+import { ensureSchema } from "@/lib/db/schema";
+import { sql } from "@/lib/db/client";
 
-const SETTINGS_PATH = path.join(DATA_DIR, "settings.json");
-
-type SettingsRecord = Record<string, unknown>;
-
-async function loadSettings(): Promise<SettingsRecord> {
-  return readJsonFile<SettingsRecord>(SETTINGS_PATH, {});
-}
-
-async function saveSettings(settings: SettingsRecord): Promise<void> {
-  await writeJsonFileAtomic(SETTINGS_PATH, settings);
-}
-
+// Was JSON-file-backed under DATA_DIR, which on Vercel resolves to
+// os.tmpdir() -- ephemeral (wiped on cold start, not shared across
+// concurrent instances). That's what made search-provider settings appear
+// to "reset" at random: whichever instance happened to serve the next
+// request simply never saw the file the previous instance wrote.
 export async function getSetting<T>(key: string, defaultValue: T): Promise<T> {
-  const settings = await loadSettings();
-  return key in settings ? (settings[key] as T) : defaultValue;
+  await ensureSchema();
+  const rows = (await sql`SELECT value FROM app_settings WHERE key = ${key}`) as { value: T }[];
+  return rows[0] ? rows[0].value : defaultValue;
 }
 
 export async function setSetting<T>(key: string, value: T): Promise<void> {
-  const settings = await loadSettings();
-  settings[key] = value;
-  await saveSettings(settings);
+  await ensureSchema();
+  await sql`
+    INSERT INTO app_settings (key, value) VALUES (${key}, ${JSON.stringify(value)})
+    ON CONFLICT (key) DO UPDATE SET value = ${JSON.stringify(value)}, updated_at = now()
+  `;
 }
