@@ -241,7 +241,8 @@ export default function ProjectWorkspace({
           </div>
           {documents.length === 0 ? (
             <p className="text-sm text-neutral-500 dark:text-neutral-400">
-              No documents uploaded yet. Upload a PDF to get an AI summary and ask questions about it.
+              No documents uploaded yet. Upload a PDF, DOCX, TXT, or Markdown file to get an AI summary and ask
+              questions about it.
             </p>
           ) : (
             <div className="space-y-3">

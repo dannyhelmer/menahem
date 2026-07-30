@@ -1,95 +1,82 @@
-import { randomUUID } from "node:crypto";
-import { readFile, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { DATA_DIR, ensureDir, readJsonFile, writeJsonFileAtomic } from "@/lib/storage/json-file";
+import { ensureSchema } from "@/lib/db/schema";
+import { sql } from "@/lib/db/client";
 import type { StoredDocument } from "./types";
 
-const DOCUMENTS_DIR = path.join(DATA_DIR, "documents");
-const INDEX_PATH = path.join(DOCUMENTS_DIR, "index.json");
-const FILES_DIR = path.join(DOCUMENTS_DIR, "files");
-const TEXT_DIR = path.join(DOCUMENTS_DIR, "text");
-
-function filePath(id: string): string {
-  return path.join(FILES_DIR, `${id}.pdf`);
+interface DocumentRow {
+  id: string;
+  project_id: string;
+  filename: string;
+  size_bytes: string;
+  uploaded_at: string;
+  summary: string;
 }
 
-function textPath(id: string): string {
-  return path.join(TEXT_DIR, `${id}.txt`);
+function toDocument(row: DocumentRow): StoredDocument {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    filename: row.filename,
+    sizeBytes: Number(row.size_bytes),
+    uploadedAt: row.uploaded_at,
+    summary: row.summary,
+  };
 }
 
-async function loadIndex(): Promise<StoredDocument[]> {
-  return readJsonFile<StoredDocument[]>(INDEX_PATH, []);
+export async function listDocuments(projectId: string, userId: string): Promise<StoredDocument[]> {
+  await ensureSchema();
+  const rows = (await sql`
+    SELECT id, project_id, filename, size_bytes, uploaded_at, summary
+    FROM documents WHERE project_id = ${projectId} AND user_id = ${userId}
+    ORDER BY uploaded_at DESC
+  `) as DocumentRow[];
+  return rows.map(toDocument);
 }
 
-async function saveIndex(documents: StoredDocument[]): Promise<void> {
-  await writeJsonFileAtomic(INDEX_PATH, documents);
+export async function getDocument(id: string, userId: string): Promise<StoredDocument | null> {
+  await ensureSchema();
+  const rows = (await sql`
+    SELECT id, project_id, filename, size_bytes, uploaded_at, summary
+    FROM documents WHERE id = ${id} AND user_id = ${userId}
+  `) as DocumentRow[];
+  return rows[0] ? toDocument(rows[0]) : null;
 }
 
-export async function listDocuments(projectId: string): Promise<StoredDocument[]> {
-  const documents = await loadIndex();
-  return documents
-    .filter((d) => d.projectId === projectId)
-    .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
+export async function getDocumentText(id: string, userId: string): Promise<string | null> {
+  await ensureSchema();
+  const rows = (await sql`SELECT text_content FROM documents WHERE id = ${id} AND user_id = ${userId}`) as {
+    text_content: string;
+  }[];
+  return rows[0]?.text_content ?? null;
 }
 
-export async function getDocument(id: string): Promise<StoredDocument | null> {
-  const documents = await loadIndex();
-  return documents.find((d) => d.id === id) ?? null;
-}
-
-export async function getDocumentText(id: string): Promise<string | null> {
-  try {
-    return await readFile(textPath(id), "utf-8");
-  } catch {
-    return null;
-  }
-}
-
-export async function getDocumentFile(id: string): Promise<Buffer | null> {
-  try {
-    return await readFile(filePath(id));
-  } catch {
-    return null;
-  }
+export async function getDocumentFile(id: string, userId: string): Promise<Buffer | null> {
+  await ensureSchema();
+  const rows = (await sql`SELECT file_data FROM documents WHERE id = ${id} AND user_id = ${userId}`) as {
+    file_data: string;
+  }[];
+  if (!rows[0]) return null;
+  return Buffer.from(rows[0].file_data, "base64");
 }
 
 export async function saveDocument(
+  userId: string,
   fields: { projectId: string; filename: string; summary: string },
-  pdfBuffer: Buffer,
+  fileBuffer: Buffer,
   text: string,
 ): Promise<StoredDocument> {
-  const id = randomUUID();
-  await ensureDir(FILES_DIR);
-  await ensureDir(TEXT_DIR);
-  await writeFile(filePath(id), pdfBuffer);
-  await writeFile(textPath(id), text, "utf-8");
-
-  const document: StoredDocument = {
-    id,
-    projectId: fields.projectId,
-    filename: fields.filename,
-    sizeBytes: pdfBuffer.byteLength,
-    uploadedAt: new Date().toISOString(),
-    summary: fields.summary,
-  };
-
-  const documents = await loadIndex();
-  documents.push(document);
-  await saveIndex(documents);
-  return document;
+  await ensureSchema();
+  const rows = (await sql`
+    INSERT INTO documents (user_id, project_id, filename, size_bytes, summary, file_data, text_content)
+    VALUES (
+      ${userId}, ${fields.projectId}, ${fields.filename}, ${fileBuffer.byteLength}, ${fields.summary},
+      ${fileBuffer.toString("base64")}, ${text}
+    )
+    RETURNING id, project_id, filename, size_bytes, uploaded_at, summary
+  `) as DocumentRow[];
+  return toDocument(rows[0]);
 }
 
-export async function deleteDocument(id: string): Promise<void> {
-  const documents = await loadIndex();
-  await saveIndex(documents.filter((d) => d.id !== id));
-  try {
-    await unlink(filePath(id));
-  } catch {
-    // already gone -- fine
-  }
-  try {
-    await unlink(textPath(id));
-  } catch {
-    // already gone -- fine
-  }
+export async function deleteDocument(id: string, userId: string): Promise<void> {
+  await ensureSchema();
+  await sql`DELETE FROM documents WHERE id = ${id} AND user_id = ${userId}`;
 }

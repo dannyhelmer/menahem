@@ -1,5 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
 import { generateDocumentSummary } from "@/lib/documents/summarize";
 import { listDocuments, saveDocument } from "@/lib/documents/store";
@@ -19,11 +20,40 @@ PDFParse.setWorker(
   ).href,
 );
 
-export const GET = withAuth(async (request: Request) => {
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+async function extractText(file: File, buffer: Buffer): Promise<string> {
+  const name = file.name.toLowerCase();
+
+  if (file.type === "application/pdf" || name.endsWith(".pdf")) {
+    const parser = new PDFParse({ data: buffer });
+    try {
+      return (await parser.getText()).text;
+    } finally {
+      await parser.destroy();
+    }
+  }
+
+  if (
+    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    name.endsWith(".docx")
+  ) {
+    const { value } = await mammoth.extractRawText({ buffer });
+    return value;
+  }
+
+  if (name.endsWith(".txt") || name.endsWith(".md") || file.type === "text/plain" || file.type === "text/markdown") {
+    return buffer.toString("utf-8");
+  }
+
+  throw new Error("Unsupported file type. Menahem accepts PDF, DOCX, TXT, and Markdown files.");
+}
+
+export const GET = withAuth(async (request: Request, _ctx, user) => {
   const projectId = new URL(request.url).searchParams.get("projectId");
   if (!projectId) return Response.json({ error: "projectId is required." }, { status: 400 });
 
-  const documents = await listDocuments(projectId);
+  const documents = await listDocuments(projectId, user.id);
   return Response.json({ documents });
 });
 
@@ -38,30 +68,31 @@ export const POST = withAuth(async (request: Request, _ctx, user) => {
   if (!(file instanceof File)) {
     return Response.json({ error: "A file is required." }, { status: 400 });
   }
-  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-    return Response.json({ error: "Only PDF files are supported." }, { status: 400 });
+  if (file.size === 0) {
+    return Response.json({ error: "That file is empty." }, { status: 400 });
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return Response.json({ error: "That file is too large (25 MB limit)." }, { status: 400 });
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
   let text: string;
   try {
-    const parser = new PDFParse({ data: buffer });
-    try {
-      const parsed = await parser.getText();
-      text = parsed.text;
-    } finally {
-      await parser.destroy();
-    }
+    text = await extractText(file, buffer);
   } catch (err) {
     return Response.json(
-      { error: err instanceof Error ? `Couldn't read that PDF: ${err.message}` : "Couldn't read that PDF." },
+      { error: err instanceof Error ? `Couldn't read that file: ${err.message}` : "Couldn't read that file." },
       { status: 400 },
     );
   }
 
+  if (!text.trim()) {
+    return Response.json({ error: "That file doesn't appear to contain any readable text." }, { status: 400 });
+  }
+
   const summary = await generateDocumentSummary(text, user.id);
-  const document = await saveDocument({ projectId, filename: file.name, summary }, buffer, text);
+  const document = await saveDocument(user.id, { projectId, filename: file.name, summary }, buffer, text);
 
   return Response.json(document);
 });

@@ -3,17 +3,17 @@ import { deleteDocument, getDocument, getDocumentText } from "@/lib/documents/st
 
 export const dynamic = "force-dynamic";
 
-export const GET = withAuth(async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+export const GET = withAuth(async (_request: Request, { params }: { params: Promise<{ id: string }> }, user) => {
   const { id } = await params;
-  const document = await getDocument(id);
+  const document = await getDocument(id, user.id);
   if (!document) return Response.json({ error: "Not found." }, { status: 404 });
 
-  const text = await getDocumentText(id);
+  const text = await getDocumentText(id, user.id);
   return Response.json({ document, text });
 });
 
-export const DELETE = withAuth(async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+export const DELETE = withAuth(async (_request: Request, { params }: { params: Promise<{ id: string }> }, user) => {
   const { id } = await params;
-  await deleteDocument(id);
+  await deleteDocument(id, user.id);
   return Response.json({ ok: true });
 });
