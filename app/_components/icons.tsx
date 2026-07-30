@@ -17,6 +17,9 @@ import {
   Share2,
   LogOut,
   ShieldCheck,
+  Settings,
+  HelpCircle,
+  ChevronRight,
 } from "lucide-react";
 
 export function SendIcon() {
@@ -69,4 +72,16 @@ export function SignOutIcon() {
 
 export function AdminIcon() {
   return <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />;
+}
+
+export function SettingsIcon() {
+  return <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />;
+}
+
+export function HelpIcon() {
+  return <HelpCircle className="h-4 w-4 shrink-0" aria-hidden="true" />;
+}
+
+export function ChevronRightIcon() {
+  return <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />;
 }

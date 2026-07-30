@@ -200,16 +200,6 @@ export default function Dashboard({
             </ul>
           )}
         </section>
-
-        <footer className="flex items-center justify-center gap-3 pt-2 text-xs text-neutral-400 dark:text-neutral-600">
-          <Link href="/privacy" className="hover:text-neutral-600 dark:hover:text-neutral-300">
-            Privacy Policy
-          </Link>
-          <span aria-hidden="true">·</span>
-          <Link href="/terms" className="hover:text-neutral-600 dark:hover:text-neutral-300">
-            Terms of Service
-          </Link>
-        </footer>
       </div>
     </main>
   );
