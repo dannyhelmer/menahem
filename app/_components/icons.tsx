@@ -23,6 +23,7 @@ import {
   Paperclip,
   X,
   Menu,
+  CreditCard,
 } from "lucide-react";
 
 export function SendIcon() {
@@ -99,4 +100,8 @@ export function CloseIcon() {
 
 export function MenuIcon() {
   return <Menu className="h-5 w-5" aria-hidden="true" />;
+}
+
+export function PricingIcon() {
+  return <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />;
 }

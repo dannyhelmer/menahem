@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { OwnerProfile } from "@/lib/settings/owner-profile";
-import { ChevronRightIcon, HelpIcon, SettingsIcon, SignOutIcon } from "./icons";
+import { ChevronRightIcon, HelpIcon, PricingIcon, SettingsIcon, SignOutIcon } from "./icons";
 
 const menuItemClass =
   "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800";
@@ -50,6 +50,11 @@ export default function AccountMenu({
           <Link href="/settings" onClick={() => setOpen(false)} className={menuItemClass}>
             <SettingsIcon />
             Settings
+          </Link>
+
+          <Link href="/pricing" onClick={() => setOpen(false)} className={menuItemClass}>
+            <PricingIcon />
+            Pricing
           </Link>
 
           <div className="group relative">

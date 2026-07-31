@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { getProvider } from "@/lib/ai/get-provider";
 import { buildSystemPrompt } from "@/lib/ai/system-prompt";
+import { buildModelMessages, performValidationPass } from "@/lib/ai/grounding";
 import type { ChatMessage } from "@/lib/ai/types";
 import { withAuth } from "@/lib/auth/with-auth";
 import { resolveFollowupTopic } from "@/lib/intelligence/conversation-manager";
@@ -147,6 +148,17 @@ interface RouteOutcome {
   skipModel?: boolean;
   skipModelMessage?: string;
   maxTokens?: number;
+  // True when this message was routed through a retrieval-grounded path
+  // (political research, comparison, deep research, web search). For these,
+  // previous conversation turns are stripped from the model's input so stale
+  // facts from prior assistant responses cannot leak into the new answer.
+  grounded: boolean;
+  // The user's message text after query resolution (follow-up expansion,
+  // jurisdiction reply resolution). Used as the sole user message when
+  // context isolation is active, so short follow-ups like "what about Harris?"
+  // are expanded into a standalone question before the conversation history
+  // is removed.
+  resolvedUserText: string;
 }
 
 const DEEP_RESEARCH_MAX_TOKENS = 6000;
@@ -162,6 +174,16 @@ async function routeMessage(
   documentId?: string,
 ): Promise<RouteOutcome> {
   text = resolveJurisdictionReply(text, messagesSnapshot);
+
+  // Resolve short follow-ups into standalone queries for ALL paths -- not
+  // just web search. This is a no-op (no LLM call) for non-short-follow-up
+  // messages, but ensures the current user message is self-contained before
+  // we strip conversation history for retrieval-grounded queries (context
+  // isolation). Without this, a short follow-up like "what about Harris?"
+  // would be sent to the model with no conversation context to resolve it.
+  const { query: resolvedText } = await resolveFollowupTopic(text, messagesSnapshot, userId);
+  text = resolvedText;
+
   const liveDataParts: string[] = [];
 
   // Research-page context (Phase 13) -- tells the model which domain the
@@ -177,7 +199,13 @@ async function routeMessage(
 
   if (isFastPathMessage(text)) {
     if (isSystemTestMessage(text)) liveDataParts.push(SYSTEM_TEST_GUIDANCE);
-    return { category: "fast_path", label: CATEGORY_LABELS.fast_path, liveDataParts };
+    return {
+      category: "fast_path",
+      label: CATEGORY_LABELS.fast_path,
+      liveDataParts,
+      grounded: false,
+      resolvedUserText: text,
+    };
   }
 
   const mathResult = runMathForMessage(text);
@@ -185,7 +213,13 @@ async function routeMessage(
     liveDataParts.push(mathResult.liveData);
     if (detectCriticism(text)) liveDataParts.push(CRITICISM_GUIDANCE);
     if (detectLearningMode(text)) liveDataParts.push(buildLearningModeGuidance(text));
-    return { category: "math", label: CATEGORY_LABELS.math, liveDataParts };
+    return {
+      category: "math",
+      label: CATEGORY_LABELS.math,
+      liveDataParts,
+      grounded: false,
+      resolvedUserText: text,
+    };
   }
 
   const politicalIntents = classifyPoliticalIntents(text);
@@ -201,6 +235,8 @@ async function routeMessage(
       liveDataParts,
       skipModel: true,
       skipModelMessage: JURISDICTION_CLARIFICATION_MESSAGE,
+      grounded: true,
+      resolvedUserText: text,
     };
   }
 
@@ -224,6 +260,8 @@ async function routeMessage(
       followups: buildFollowupSuggestions(politicalIntents),
       skipModel: requiresLiveData(text) && packet.confidence === "low",
       maxTokens: DEEP_RESEARCH_MAX_TOKENS,
+      grounded: true,
+      resolvedUserText: text,
     };
   }
 
@@ -246,6 +284,8 @@ async function routeMessage(
         confidenceReason: packet.confidenceReason,
         followups: buildFollowupSuggestions(politicalIntents),
         skipModel: requiresLiveData(text) && packet.confidence === "low",
+        grounded: true,
+        resolvedUserText: text,
       };
     }
   }
@@ -272,6 +312,8 @@ async function routeMessage(
       confidenceReason: packet.confidenceReason,
       followups: buildFollowupSuggestions(politicalIntents),
       skipModel: requiresLiveData(text) && packet.confidence === "low",
+      grounded: true,
+      resolvedUserText: text,
     };
   }
 
@@ -299,13 +341,12 @@ async function routeMessage(
 
   if (shouldSearch) {
     label = CATEGORY_LABELS.web_search;
-    // resolveFollowupTopic no-ops internally (no LLM call) unless the
-    // message actually looks like a short follow-up or a reply to a
-    // clarifying question -- always safe to call.
-    const { query } = await resolveFollowupTopic(text, messagesSnapshot, userId);
-    console.log(`[web-search] raw query sent to search provider: "${query}"`);
+    // resolveFollowupTopic was already called at the top of routeMessage
+    // for all paths -- the `text` variable is already query-resolved, so
+    // we use it directly here instead of calling resolveFollowupTopic again.
+    console.log(`[web-search] raw query sent to search provider: "${text}"`);
 
-    const searchResult = await runSearchForMessage(query, needsLiveInfo ? 10 : 6, {
+    const searchResult = await runSearchForMessage(text, needsLiveInfo ? 10 : 6, {
       preferRecent: detectRecencyNeed(text),
     });
     if (searchResult.success && searchResult.liveData) {
@@ -336,7 +377,14 @@ async function routeMessage(
   if (detectCriticism(text)) liveDataParts.push(CRITICISM_GUIDANCE);
   if (detectLearningMode(text)) liveDataParts.push(buildLearningModeGuidance(text));
 
-  return { category: shouldSearch ? "web_search" : category, label, liveDataParts, sources };
+  return {
+    category: shouldSearch ? "web_search" : category,
+    label,
+    liveDataParts,
+    sources,
+    grounded: shouldSearch,
+    resolvedUserText: text,
+  };
 }
 
 export const POST = withAuth(async (request, _ctx, user) => {
@@ -447,6 +495,8 @@ export const POST = withAuth(async (request, _ctx, user) => {
           skipModel,
           skipModelMessage,
           maxTokens,
+          grounded,
+          resolvedUserText,
         } = await routeMessage(
           userMessage.content,
           messages,
@@ -477,7 +527,30 @@ export const POST = withAuth(async (request, _ctx, user) => {
         } else {
           const liveData = liveDataParts.length ? liveDataParts.join("\n\n---\n\n") : undefined;
           const systemPrompt = await buildSystemPrompt(liveData, user.id);
-          const fullMessages: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...messages];
+
+          // CONTEXT ISOLATION: for retrieval-grounded messages, the model
+          // receives ONLY the system prompt (with live data) and the current
+          // user message -- no previous conversation turns. This is the
+          // primary fix for the grounding bug: previous assistant responses
+          // (which may contain factual claims from prior retrievals) are
+          // physically absent from the model's input, so they cannot leak
+          // into the new answer.
+          //
+          // For non-grounded messages (fast path, math, casual conversation),
+          // the full conversation history is preserved so the model can
+          // maintain conversational context.
+          const fullMessages: ChatMessage[] = buildModelMessages(
+            grounded,
+            systemPrompt,
+            messages,
+            resolvedUserText,
+          );
+
+          console.log(
+            `[grounding] category="${category}" grounded=${grounded} ` +
+              `messages_sent_to_model=${fullMessages.length} ` +
+              `(isolated=${grounded ? "YES -- only system + current user message" : "NO -- full history"})`,
+          );
           console.log(
             `[web-search] final system prompt sent to model (${systemPrompt.length} chars). Live data section:\n` +
               (liveData ?? "(none)"),
@@ -497,6 +570,23 @@ export const POST = withAuth(async (request, _ctx, user) => {
           assistantText = trimToSentenceBoundary(assistantText);
           writeFrame({ type: "truncated", content: assistantText });
         }
+
+        // EVIDENCE VALIDATION: post-generation pass that checks the response
+        // against retrieved sources. If the response makes claims without
+        // any sources to back them, a grounding notice is appended.
+        const liveData = liveDataParts.length ? liveDataParts.join("\n\n---\n\n") : undefined;
+        const { response: validatedText, issues } = performValidationPass(
+          assistantText,
+          allSources ?? [],
+          liveData,
+        );
+        if (issues.length > 0) {
+          console.warn(
+            `[grounding] validation issues for category="${category}": ` +
+              issues.map((i) => `${i.type}: ${i.detail}`).join("; "),
+          );
+        }
+        assistantText = validatedText;
 
         await appendMessage(sessionId, user.id, {
           role: "assistant",

@@ -1,5 +1,6 @@
 import { getProvider } from "./get-provider";
 import { getOwnerProfile } from "@/lib/settings/owner-profile";
+import { GROUNDING_INSTRUCTIONS } from "./grounding";
 
 // Ported verbatim from the Python desktop app's core/prompts.py
 // (BASE_SYSTEM_PROMPT + build_system_prompt). This is Menahem's actual
@@ -384,7 +385,14 @@ export async function buildSystemPrompt(liveData?: string, userId?: string): Pro
     formatRuntimeContext(),
     ownerBlock,
   ];
-  if (liveData) parts.push(liveData);
+  if (liveData) {
+    // When live data (retrieved documents) is present, inject explicit
+    // grounding rules that reinforce context isolation at the model level:
+    // the model is told that ONLY the live data section is authoritative and
+    // that previous conversation turns must not be treated as evidence.
+    parts.push(GROUNDING_INSTRUCTIONS);
+    parts.push(liveData);
+  }
 
   return parts.join("\n\n");
 }
