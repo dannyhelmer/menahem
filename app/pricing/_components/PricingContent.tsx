@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ShieldCheck, Lock, CheckCircle, XCircle } from "lucide-react";
+import { ShieldCheck, Lock } from "lucide-react";
 import { PRICING_PLANS, PRICING_FAQS, type BillingInterval } from "@/lib/pricing/plans";
 import PricingCard from "./PricingCard";
 import BillingToggle from "./BillingToggle";
@@ -13,9 +12,6 @@ import PaymentIcons from "./PaymentIcons";
 export default function PricingContent() {
   const [interval, setInterval] = useState<BillingInterval>("monthly");
   const [loading, setLoading] = useState(false);
-  const searchParams = useSearchParams();
-  const isSuccess = searchParams.get("success") === "true";
-  const isCanceled = searchParams.get("canceled") === "true";
 
   async function handleUpgrade() {
     setLoading(true);
@@ -44,28 +40,6 @@ export default function PricingContent() {
           ← Back to Menahem
         </Link>
       </div>
-
-      {isSuccess && (
-        <div className="mx-auto mt-4 max-w-2xl px-6">
-          <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900 dark:bg-green-950/50">
-            <CheckCircle className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400" aria-hidden="true" />
-            <p className="text-sm text-green-800 dark:text-green-300">
-              Payment successful! Your Pro subscription is now active.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {isCanceled && (
-        <div className="mx-auto mt-4 max-w-2xl px-6">
-          <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/50">
-            <XCircle className="h-5 w-5 shrink-0 text-neutral-400" aria-hidden="true" />
-            <p className="text-sm text-neutral-600 dark:text-neutral-400">
-              Checkout was canceled. You can upgrade anytime.
-            </p>
-          </div>
-        </div>
-      )}
 
       <section className="px-6 pb-10 pt-12 text-center">
         <div className="mx-auto max-w-2xl">

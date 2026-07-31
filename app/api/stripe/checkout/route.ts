@@ -27,8 +27,8 @@ export const POST = withAuth(async (_request, _ctx, user) => {
         plan: 'pro',
       },
       customer_email: user.email,
-      success_url: SITE_URL + '/pricing?success=true',
-      cancel_url: SITE_URL + '/pricing?canceled=true',
+      success_url: SITE_URL + '/billing/success',
+      cancel_url: SITE_URL + '/pricing',
     });
 
     return Response.json({ url: session.url });
