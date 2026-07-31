@@ -73,7 +73,7 @@ export const PRICING_PLANS: PricingPlan[] = [
     id: "pro",
     name: "Pro",
     description:
-      "Designed for journalists, students, attorneys, researchers, campaigns, and public officials.",
+      "Made for anyone who wants deeper, faster, and more powerful government research.",
     monthlyPrice: 20,
     badge: "Most Popular",
     highlighted: true,

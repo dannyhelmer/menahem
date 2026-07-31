@@ -14,7 +14,7 @@ const PUBLIC_PATHS = ["/signin", "/signup", "/privacy", "/terms", "/about"];
 // /api/auth/me deliberately allows both logged-in and logged-out callers --
 // it always responds 200 with { user: null } when there's no session, so it
 // must never be blocked here before it gets a chance to say that.
-const PUBLIC_API_PATHS = ["/api/auth/signin", "/api/auth/signup", "/api/auth/me"];
+const PUBLIC_API_PATHS = ["/api/auth/signin", "/api/auth/signup", "/api/auth/me", "/api/stripe/webhook"];
 
 function matchesAny(pathname: string, list: string[]): boolean {
   return list.some((path) => pathname === path || pathname.startsWith(`${path}/`));

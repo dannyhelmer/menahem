@@ -6,6 +6,8 @@ import { PDFParse } from "pdf-parse";
 import { generateDocumentSummary } from "@/lib/documents/summarize";
 import { listDocuments, saveDocument } from "@/lib/documents/store";
 import { withAuth } from "@/lib/auth/with-auth";
+import { checkUploadLimit, checkFileSize } from "@/lib/subscription/guards";
+import { incrementUploadCount, recordUploadEvent } from "@/lib/subscription/store";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,7 @@ PDFParse.setWorker(
   ).href,
 );
 
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 async function extractText(file: File, buffer: Buffer): Promise<string> {
   const name = file.name.toLowerCase();
@@ -72,8 +74,35 @@ export const POST = withAuth(async (request: Request, _ctx, user) => {
   if (file.size === 0) {
     return Response.json({ error: "That file is empty." }, { status: 400 });
   }
-  if (file.size > MAX_UPLOAD_BYTES) {
-    return Response.json({ error: "That file is too large (25 MB limit)." }, { status: 400 });
+
+  // ---- Subscription limit check: file size ----
+  const sizeCheck = await checkFileSize(user, file.size);
+  if (!sizeCheck.allowed) {
+    return Response.json(
+      {
+        error: sizeCheck.reason ?? "File too large.",
+        limit: { type: "file_size", current: sizeCheck.current, max: sizeCheck.max, plan: sizeCheck.plan },
+      },
+      { status: 403 },
+    );
+  }
+
+  // ---- Subscription limit check: upload count ----
+  const uploadCheck = await checkUploadLimit(user);
+  if (!uploadCheck.allowed) {
+    return Response.json(
+      {
+        error: uploadCheck.reason ?? "Upload limit reached.",
+        limit: {
+          type: "uploads",
+          current: uploadCheck.current,
+          max: uploadCheck.max,
+          plan: uploadCheck.plan,
+          nextAvailableAt: uploadCheck.nextAvailableAt,
+        },
+      },
+      { status: 403 },
+    );
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -94,6 +123,10 @@ export const POST = withAuth(async (request: Request, _ctx, user) => {
 
   const summary = await generateDocumentSummary(text, user.id);
   const document = await saveDocument(user.id, { projectId, filename: file.name, summary }, buffer, text);
+
+  // Record the upload event and increment the counter
+  await recordUploadEvent(user.id, document.id, file.name, file.size);
+  await incrementUploadCount(user.id);
 
   return Response.json(document);
 });

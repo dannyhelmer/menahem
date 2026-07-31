@@ -100,6 +100,55 @@ async function runMigrations(): Promise<void> {
       updated_at timestamptz NOT NULL DEFAULT now()
     )
   `;
+
+  // Subscription tracking -- stores Stripe customer/subscription IDs and
+  // billing status so webhooks can upgrade/downgrade users automatically.
+  await sql`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      stripe_customer_id text UNIQUE,
+      stripe_subscription_id text UNIQUE,
+      stripe_price_id text,
+      plan text NOT NULL DEFAULT 'free',
+      status text NOT NULL DEFAULT 'free',
+      current_period_start timestamptz,
+      current_period_end timestamptz,
+      cancel_at_period_end boolean NOT NULL DEFAULT false,
+      canceled_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `;
+
+  // Usage tracking -- one row per user per billing cycle. Counters reset
+  // when the billing cycle renews (current_period_end changes).
+  await sql`
+    CREATE TABLE IF NOT EXISTS usage_tracking (
+      user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      messages_this_cycle int NOT NULL DEFAULT 0,
+      uploads_this_cycle int NOT NULL DEFAULT 0,
+      billing_cycle_start timestamptz NOT NULL DEFAULT now(),
+      billing_cycle_end timestamptz,
+      last_message_at timestamptz,
+      last_upload_at timestamptz,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `;
+
+  // Upload history -- individual upload timestamps for rolling 24h window
+  // enforcement (free plan). Each row is one upload event.
+  await sql`
+    CREATE TABLE IF NOT EXISTS upload_events (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      document_id uuid,
+      filename text NOT NULL,
+      size_bytes bigint NOT NULL,
+      uploaded_at timestamptz NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS upload_events_user_id_idx ON upload_events(user_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS upload_events_uploaded_at_idx ON upload_events(uploaded_at)`;
 }
 
 export function ensureSchema(): Promise<void> {

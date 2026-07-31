@@ -5,6 +5,8 @@ import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import { buildModelMessages, performValidationPass } from "@/lib/ai/grounding";
 import type { ChatMessage } from "@/lib/ai/types";
 import { withAuth } from "@/lib/auth/with-auth";
+import { checkMessageLimit, checkDeepResearch, checkConversationLimit } from "@/lib/subscription/guards";
+import { incrementMessageCount } from "@/lib/subscription/store";
 import { resolveFollowupTopic } from "@/lib/intelligence/conversation-manager";
 import { CRITICISM_GUIDANCE, detectCriticism } from "@/lib/intelligence/criticism";
 import { isFastPathMessage, isSystemTestMessage, SYSTEM_TEST_GUIDANCE } from "@/lib/intelligence/fast-path";
@@ -458,6 +460,43 @@ export const POST = withAuth(async (request, _ctx, user) => {
       const onStage = (label: string) => writeFrame({ type: "status", category: "deep_research", label });
 
       try {
+        // ---- Subscription limit check: message count ----
+        if (!continuation) {
+          const messageCheck = await checkMessageLimit(user);
+          if (!messageCheck.allowed) {
+            writeFrame({
+              type: "error",
+              message: messageCheck.reason ?? "You've reached your message limit.",
+              limit: {
+                type: "messages",
+                current: messageCheck.current,
+                max: messageCheck.max,
+                plan: messageCheck.plan,
+              },
+            });
+            return;
+          }
+        }
+
+        // ---- Subscription limit check: conversation count ----
+        // Only for new conversations (not existing sessions being continued).
+        if (!continuation && !existingSession) {
+          const convCheck = await checkConversationLimit(user);
+          if (!convCheck.allowed) {
+            writeFrame({
+              type: "error",
+              message: convCheck.reason ?? "You've reached your conversation limit.",
+              limit: {
+                type: "conversations",
+                current: convCheck.current,
+                max: convCheck.max,
+                plan: convCheck.plan,
+              },
+            });
+            return;
+          }
+        }
+
         if (continuation) {
           // Plain continuation completion -- no re-classification or
           // research retrieval. The already-written text (now in `messages`
@@ -519,6 +558,24 @@ export const POST = withAuth(async (request, _ctx, user) => {
         if (allSources && allSources.length > 0) writeFrame({ type: "sources", sources: allSources });
         if (confidence) writeFrame({ type: "confidence", level: confidence, reason: confidenceReason });
         if (followups && followups.length > 0) writeFrame({ type: "followups", suggestions: followups });
+
+        // ---- Subscription limit check: Deep Research ----
+        if (deepResearchEnabled) {
+          const deepResearchCheck = await checkDeepResearch(user);
+          if (!deepResearchCheck.allowed) {
+            writeFrame({
+              type: "error",
+              message: deepResearchCheck.reason ?? "Deep Research is a Pro feature.",
+              limit: { type: "deep_research", plan: deepResearchCheck.plan },
+            });
+            return;
+          }
+        }
+
+        // ---- Increment message counter (only for real model calls) ----
+        if (!skipModel) {
+          await incrementMessageCount(user.id);
+        }
 
         let truncated = false;
         if (skipModel) {
