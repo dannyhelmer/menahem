@@ -54,7 +54,7 @@ export default function AccountMenu({
 
           <Link href="/pricing" onClick={() => setOpen(false)} className={menuItemClass}>
             <PricingIcon />
-            Pricing
+            Upgrade Plan
           </Link>
 
           <div className="group relative">

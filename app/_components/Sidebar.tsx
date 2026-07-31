@@ -7,7 +7,7 @@ import type { ConversationSummary } from "@/lib/memory/types";
 import type { OwnerProfile } from "@/lib/settings/owner-profile";
 import AccountMenu from "./AccountMenu";
 import { useConversationsRefresh } from "./ConversationsProvider";
-import { AdminIcon, CloseIcon, MenuIcon, PlusIcon, PricingIcon, SearchIcon, WorkspaceIcon } from "./icons";
+import { AdminIcon, CloseIcon, MenuIcon, PlusIcon, SearchIcon, WorkspaceIcon } from "./icons";
 import SidebarConversationItem from "./SidebarConversationItem";
 
 function SidebarSection({ title, items }: { title: string; items: ConversationSummary[] }) {
@@ -98,17 +98,6 @@ function SidebarContent({
         >
           <WorkspaceIcon />
           Political Workspace
-        </Link>
-      </div>
-
-      <div className="mt-2 px-4">
-        <Link
-          href="/pricing"
-          onClick={onNavigate}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-300 dark:hover:border-neutral-700 dark:hover:text-neutral-50"
-        >
-          <PricingIcon />
-          Pricing
         </Link>
       </div>
 
