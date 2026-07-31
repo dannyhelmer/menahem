@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ShieldCheck, Lock } from "lucide-react";
+import { ShieldCheck, Lock, CheckCircle, XCircle } from "lucide-react";
 import { PRICING_PLANS, PRICING_FAQS, type BillingInterval } from "@/lib/pricing/plans";
 import PricingCard from "./PricingCard";
 import BillingToggle from "./BillingToggle";
@@ -11,10 +12,30 @@ import PaymentIcons from "./PaymentIcons";
 
 export default function PricingContent() {
   const [interval, setInterval] = useState<BillingInterval>("monthly");
+  const [loading, setLoading] = useState(false);
+  const searchParams = useSearchParams();
+  const isSuccess = searchParams.get("success") === "true";
+  const isCanceled = searchParams.get("canceled") === "true";
+
+  async function handleUpgrade() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/stripe/checkout", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to start checkout. Please try again.");
+        setLoading(false);
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      alert("Something went wrong. Please try again.");
+      setLoading(false);
+    }
+  }
 
   return (
     <main className="flex-1 overflow-y-auto bg-white dark:bg-neutral-950">
-      {/* Back link */}
       <div className="mx-auto max-w-5xl px-6 pt-8">
         <Link
           href="/"
@@ -24,7 +45,28 @@ export default function PricingContent() {
         </Link>
       </div>
 
-      {/* Header */}
+      {isSuccess && (
+        <div className="mx-auto mt-4 max-w-2xl px-6">
+          <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900 dark:bg-green-950/50">
+            <CheckCircle className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400" aria-hidden="true" />
+            <p className="text-sm text-green-800 dark:text-green-300">
+              Payment successful! Your Pro subscription is now active.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {isCanceled && (
+        <div className="mx-auto mt-4 max-w-2xl px-6">
+          <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/50">
+            <XCircle className="h-5 w-5 shrink-0 text-neutral-400" aria-hidden="true" />
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              Checkout was canceled. You can upgrade anytime.
+            </p>
+          </div>
+        </div>
+      )}
+
       <section className="px-6 pb-10 pt-12 text-center">
         <div className="mx-auto max-w-2xl">
           <h1 className="text-4xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 sm:text-5xl">
@@ -35,17 +77,21 @@ export default function PricingContent() {
           </p>
         </div>
 
-        {/* Billing toggle */}
         <div className="mt-8 flex justify-center">
           <BillingToggle interval={interval} onChange={setInterval} />
         </div>
       </section>
 
-      {/* Pricing cards */}
       <section className="px-6 pb-16">
         <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
           {PRICING_PLANS.map((plan) => (
-            <PricingCard key={plan.id} plan={plan} interval={interval} />
+            <PricingCard
+              key={plan.id}
+              plan={plan}
+              interval={interval}
+              onUpgrade={plan.id === "pro" ? handleUpgrade : undefined}
+              loading={loading}
+            />
           ))}
         </div>
 
@@ -54,7 +100,6 @@ export default function PricingContent() {
         </p>
       </section>
 
-      {/* FAQ */}
       <section className="border-t border-neutral-100 bg-neutral-50 px-6 py-16 dark:border-neutral-900 dark:bg-neutral-900/50">
         <div className="mx-auto max-w-2xl">
           <h2 className="mb-8 text-center text-2xl font-semibold text-neutral-900 dark:text-neutral-50">
@@ -64,7 +109,6 @@ export default function PricingContent() {
         </div>
       </section>
 
-      {/* Secure payment section */}
       <section className="px-6 py-12">
         <div className="mx-auto max-w-2xl text-center">
           <div className="mb-4 flex items-center justify-center gap-2 text-neutral-700 dark:text-neutral-300">

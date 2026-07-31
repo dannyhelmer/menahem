@@ -6,9 +6,11 @@ import { getDisplayPrice, getBillingSuffix } from "@/lib/pricing/plans";
 interface PricingCardProps {
   plan: PricingPlan;
   interval: BillingInterval;
+  onUpgrade?: () => void;
+  loading?: boolean;
 }
 
-export default function PricingCard({ plan, interval }: PricingCardProps) {
+export default function PricingCard({ plan, interval, onUpgrade, loading }: PricingCardProps) {
   const displayPrice = getDisplayPrice(plan.monthlyPrice, interval);
   const billingSuffix = getBillingSuffix(interval);
   const isFree = plan.monthlyPrice === 0;
@@ -41,16 +43,30 @@ export default function PricingCard({ plan, interval }: PricingCardProps) {
         <span className="text-sm text-neutral-500 dark:text-neutral-400">{billingSuffix}</span>
       </div>
 
-      <Link
-        href={plan.ctaHref}
-        className={`mb-8 block rounded-xl py-2.5 text-center text-sm font-medium transition-colors duration-150 ${
-          plan.highlighted
-            ? "bg-burgundy text-white hover:bg-burgundy-dark"
-            : "border border-neutral-300 text-neutral-900 hover:border-neutral-400 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-100 dark:hover:bg-neutral-800"
-        }`}
-      >
-        {plan.ctaLabel}
-      </Link>
+      {onUpgrade ? (
+        <button
+          onClick={onUpgrade}
+          disabled={loading}
+          className={`mb-8 block w-full rounded-xl py-2.5 text-center text-sm font-medium transition-colors duration-150 disabled:opacity-60 ${
+            plan.highlighted
+              ? "bg-burgundy text-white hover:bg-burgundy-dark"
+              : "border border-neutral-300 text-neutral-900 hover:border-neutral-400 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-100 dark:hover:bg-neutral-800"
+          }`}
+        >
+          {loading ? "Redirecting..." : plan.ctaLabel}
+        </button>
+      ) : (
+        <Link
+          href={plan.ctaHref}
+          className={`mb-8 block rounded-xl py-2.5 text-center text-sm font-medium transition-colors duration-150 ${
+            plan.highlighted
+              ? "bg-burgundy text-white hover:bg-burgundy-dark"
+              : "border border-neutral-300 text-neutral-900 hover:border-neutral-400 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-100 dark:hover:bg-neutral-800"
+          }`}
+        >
+          {plan.ctaLabel}
+        </Link>
+      )}
 
       <div className="flex-1 space-y-3">
         {plan.features.map((feature) => (

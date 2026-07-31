@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
+    "@stripe/stripe-js": "^9.12.1",
     "bcryptjs": "^3.0.3",
     "icojs": "^1.0.0",
     "jose": "^6.2.5",
@@ -23,7 +24,8 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "stripe": "^22.4.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
