@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, Lock } from "lucide-react";
 import { PRICING_PLANS, PRICING_FAQS, type BillingInterval } from "@/lib/pricing/plans";
@@ -9,9 +9,26 @@ import BillingToggle from "./BillingToggle";
 import FaqAccordion from "./FaqAccordion";
 import PaymentIcons from "./PaymentIcons";
 
+interface UsageData {
+  plan: string;
+  isPro: boolean;
+}
+
 export default function PricingContent() {
   const [interval, setInterval] = useState<BillingInterval>("monthly");
   const [loading, setLoading] = useState(false);
+  const [usage, setUsage] = useState<UsageData | null>(null);
+
+  useEffect(() => {
+    // Fetch the user's current plan. If this fails (not signed in),
+    // usage stays null and we show guest CTAs.
+    fetch("/api/usage")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setUsage({ plan: data.plan, isPro: data.isPro });
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleUpgrade() {
     setLoading(true);
@@ -28,6 +45,37 @@ export default function PricingContent() {
       alert("Something went wrong. Please try again.");
       setLoading(false);
     }
+  }
+
+  // Determine CTA behavior for each plan based on user's auth/plan status.
+  // - Guest (not signed in): "Get Started" → /signup for both plans
+  // - Signed-in Free user: Free card shows "Your Current Plan" (disabled),
+  //   Pro card shows "Upgrade to Pro" (triggers Stripe checkout)
+  // - Signed-in Pro user: Free card shows "Get Started" (link to /),
+  //   Pro card shows "Your Current Plan" (disabled)
+  function getCardProps(planId: string) {
+    if (!usage) {
+      // Guest -- not signed in
+      return { onUpgrade: undefined, loading: false, ctaLabel: "Get Started", ctaHref: "/signup" };
+    }
+
+    if (planId === "pro" && usage.isPro) {
+      // Already on Pro
+      return { onUpgrade: undefined, loading: false, ctaLabel: "Your Current Plan", ctaHref: "" };
+    }
+
+    if (planId === "free" && !usage.isPro) {
+      // Already on Free
+      return { onUpgrade: undefined, loading: false, ctaLabel: "Your Current Plan", ctaHref: "" };
+    }
+
+    if (planId === "pro" && !usage.isPro) {
+      // Free user upgrading to Pro
+      return { onUpgrade: handleUpgrade, loading, ctaLabel: "Upgrade to Pro", ctaHref: "" };
+    }
+
+    // Pro user looking at Free card
+    return { onUpgrade: undefined, loading: false, ctaLabel: "Get Started", ctaHref: "/" };
   }
 
   return (
@@ -58,15 +106,18 @@ export default function PricingContent() {
 
       <section className="px-6 pb-16">
         <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
-          {PRICING_PLANS.map((plan) => (
-            <PricingCard
-              key={plan.id}
-              plan={plan}
-              interval={interval}
-              onUpgrade={plan.id === "pro" ? handleUpgrade : undefined}
-              loading={loading}
-            />
-          ))}
+          {PRICING_PLANS.map((plan) => {
+            const props = getCardProps(plan.id);
+            return (
+              <PricingCard
+                key={plan.id}
+                plan={{ ...plan, ctaLabel: props.ctaLabel || plan.ctaLabel, ctaHref: props.ctaHref }}
+                interval={interval}
+                onUpgrade={props.onUpgrade}
+                loading={props.loading}
+              />
+            );
+          })}
         </div>
 
         <p className="mt-8 text-center text-sm text-neutral-400 dark:text-neutral-600">

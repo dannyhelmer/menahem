@@ -55,6 +55,17 @@ export default function PricingCard({ plan, interval, onUpgrade, loading }: Pric
         >
           {loading ? "Redirecting..." : plan.ctaLabel}
         </button>
+      ) : plan.ctaHref === "" ? (
+        <button
+          disabled
+          className={`mb-8 block w-full cursor-default rounded-xl py-2.5 text-center text-sm font-medium ${
+            plan.highlighted
+              ? "bg-green-600 text-white"
+              : "border border-green-300 text-green-700 dark:border-green-700 dark:text-green-400"
+          }`}
+        >
+          {plan.ctaLabel}
+        </button>
       ) : (
         <Link
           href={plan.ctaHref}
