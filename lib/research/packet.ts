@@ -23,27 +23,36 @@ const LEGISLATIVE_SUMMARY_INTENTS: PoliticalIntent[] = [
 // this same function per sub-question/side.
 const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "This question concerns legislation, a budget, or a regulation -- structure the answer neutrally: (1) a " +
-  "concise factual overview of what it actually does, (2) the strongest arguments from supporters (their " +
-  "stated goals and expected benefits), (3) the strongest arguments from critics (their concerns and " +
-  "projected consequences), then close with two short labeled sections, \"Areas of Broad Agreement\" and " +
-  "\"Areas of Debate.\" Keep fact, projection, and opinion visibly distinct -- never blend them into one " +
-  "sentence. Any estimate (spending, coverage, economic effects) must name who produced it (e.g. the " +
-  "Congressional Budget Office, the White House, an advocacy group, a think tank) and note that it depends on " +
-  "stated assumptions, not just report a bare number. Prefer primary sources (the bill text itself, official " +
-  "government analyses, nonpartisan agencies) over advocacy-organization framing; if advocacy sources are " +
-  "used, include organizations representing more than one perspective, and say so explicitly if the available " +
-  "sources lean one direction. Avoid emotionally loaded language (\"devastating,\" \"radical,\" \"massive,\" " +
-  "\"disastrous\") unless directly quoting a named source, clearly marked as a quote. For individual checkable " +
-  "claims within the answer (a specific figure, date, projection, or attributed position) -- not ordinary " +
-  "connecting prose -- tag the claim's evidentiary status inline as **Fact:**, **Projection:**, or " +
-  "**Opinion:**, each followed by a confidence note (High/Medium/Low for facts and projections, \"Opinion " +
-  "(attributed claim)\" for opinions). For example: \"**Fact:** The bill raises the Child Tax Credit from " +
-  "$2,000 to $2,200. (Confidence: High.)\" / \"**Projection:** The Congressional Budget Office estimates " +
-  "approximately 17 million people could lose coverage under this bill. (Confidence: Medium -- a modeled " +
-  "estimate, not a certainty.)\" / \"**Opinion:** Critics argue the bill will substantially harm rural " +
-  "hospitals. (Confidence: Opinion -- an attributed position, not a verified fact.)\" In addition to Fact/" +
-  "Projection/Opinion, tag anything you're inferring or unsure of as **Speculation:**, with confidence noted as " +
-  "\"Speculation (unverified)\" -- never present a guess as if it were a fact.\n\n" +
+  "concise factual overview of what it actually does, (2) a section headed exactly \"Supporters Argue\" " +
+  "covering the strongest arguments for it (stated goals and expected benefits, attributed to who's actually " +
+  "making them), (3) a section headed exactly \"Critics Argue\" covering the strongest arguments against it " +
+  "(concerns and projected consequences, attributed the same way). Summarize each side fairly from real, " +
+  "sourced material -- never invent a position nobody has actually taken, and never present either side's " +
+  "argument as objective fact rather than an attributed position. Do not add an \"Areas of Agreement\" or " +
+  "consensus section -- that framing implies a political consensus exists, which isn't something to assert. " +
+  "Keep fact, projection, and opinion visibly distinct -- never blend them into one sentence. Any estimate " +
+  "(spending, coverage, economic effects) must name who produced it (e.g. the Congressional Budget Office, the " +
+  "White House, an advocacy group, a think tank) and note that it depends on stated assumptions, not just " +
+  "report a bare number. Prefer primary sources (the bill text itself, official government analyses, " +
+  "nonpartisan agencies) over advocacy-organization framing; if advocacy sources are used, include " +
+  "organizations representing more than one perspective, and say so explicitly if the available sources lean " +
+  "one direction. Avoid emotionally loaded language (\"devastating,\" \"radical,\" \"massive,\" \"disastrous\") " +
+  "unless directly quoting a named source, clearly marked as a quote. For individual checkable claims within " +
+  "the answer (a specific figure, date, projection, or attributed position) -- not ordinary connecting prose -- " +
+  "tag the claim's evidentiary status inline as **Fact:**, **Projection:**, or **Opinion:**, each followed by a " +
+  "confidence note (High/Medium/Low for facts and projections, \"Opinion (attributed claim)\" for opinions). " +
+  "For example: \"**Fact:** The bill raises the Child Tax Credit from $2,000 to $2,200. (Confidence: High.)\" / " +
+  "\"**Projection:** The Congressional Budget Office estimates approximately 17 million people could lose " +
+  "coverage under this bill. (Confidence: Medium -- a modeled estimate, not a certainty.)\" / \"**Opinion:** " +
+  "Critics argue the bill will substantially harm rural hospitals. (Confidence: Opinion -- an attributed " +
+  "position, not a verified fact.)\" In addition to Fact/Projection/Opinion, tag anything you're inferring or " +
+  "unsure of as **Speculation:**, with confidence noted as \"Speculation (unverified)\" -- never present a " +
+  "guess as if it were a fact.\n\n" +
+  "When a bill has a commonly recognized popular name distinct from its formal legal title (e.g. an act whose " +
+  "official title is a dry procedural description but which is widely known by a shorter public name), state " +
+  "both explicitly and label which is which -- \"Official Title\" for the formal legal text, \"Common Name\" " +
+  "for the name it's actually known by. Only do this when a real, distinct common name exists; don't invent one " +
+  "or force the distinction when a bill is only ever referred to by its official title.\n\n" +
   "Bill numbers restart every new Congress -- the same number (e.g. H.R. 1) can refer to a completely " +
   "different bill in a different Congress. Before answering, explicitly determine and state: (1) which " +
   "Congress the bill belongs to (e.g. 116th, 117th, 118th, 119th), (2) its official title, (3) whether it " +
@@ -52,11 +61,16 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "share the same number. If the retrieved data or your own knowledge suggests two different bills share this " +
   "number, stop and say plainly: \"Possible bill-number collision detected. H.R. numbers restart every " +
   "Congress. These appear to be different bills.\" and address them separately rather than merging them.\n\n" +
-  "End every legislative/policy answer with a consistency check in exactly this format:\n" +
-  "✓ Official title matches\n✓ Congress matches\n✓ Bill number matches\n✓ Provisions belong " +
-  "to this bill\n✓ Legislative status matches\n" +
-  "If any of these doesn't actually hold for what you've written, silently rewrite the answer before showing " +
-  "it -- never display a checkmark that isn't true.";
+  "End every legislative/policy answer with a section headed exactly \"Verification\" listing, as checkmarked " +
+  "lines, ONLY the specific items you can actually confirm from the data you were given -- bill number, " +
+  "Congress/session, official title, sponsor, current legislative status, policy area, and official government " +
+  "source match are the possible items, but this is not a fixed template to fill in regardless of what you " +
+  "actually have. Omit any line you cannot genuinely verify -- never display a checkmark for something you " +
+  "didn't actually confirm, and never claim a verification step happened if it didn't. A shorter, honest list " +
+  "is correct; a complete-looking but partly fabricated one is not. Format each confirmed line as, for example, " +
+  "\"✓ Bill number verified\" / \"✓ Congress.gov match\" / \"✓ Sponsor verified\" / \"✓ Legislative status " +
+  "verified.\" If you cannot verify any of these items at all, omit the Verification section entirely rather " +
+  "than showing an empty or fabricated one.";
 
 // Best-effort: a bill's real, sourced action history gives the model
 // ordered ground truth instead of asking it to infer sequence from a
