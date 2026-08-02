@@ -167,7 +167,9 @@ export async function buildResearchPacket(
   intents: Set<PoliticalIntent>,
   jurisdiction: Jurisdiction,
   state: string | null,
+  options?: { maxSearchResults?: number },
 ): Promise<ResearchPacket> {
+  const maxSearchResults = options?.maxSearchResults ?? 10;
   const providers = selectGovProviders(intents, jurisdiction);
   const liveDataParts: string[] = [];
   const sources: TieredSource[] = [];
@@ -191,7 +193,7 @@ export async function buildResearchPacket(
     }
   }
 
-  const searchResult = await runSearchForMessage(question, 10, { preferRecent: detectRecencyNeed(question) });
+  const searchResult = await runSearchForMessage(question, maxSearchResults, { preferRecent: detectRecencyNeed(question) });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
     for (const s of searchResult.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url) });

@@ -1,7 +1,7 @@
 import { getProvider } from "@/lib/ai/get-provider";
 
 const FALLBACK_SUMMARY = "Summary unavailable -- Menahem's local model wasn't reachable at upload time.";
-const MAX_INPUT_LENGTH = 12_000;
+const MAX_INPUT_LENGTH = 30_000;
 
 // Same one-shot, non-streaming pattern as lib/memory/title.ts's generateTitle.
 export async function generateDocumentSummary(text: string, userId?: string): Promise<string> {
@@ -13,7 +13,7 @@ export async function generateDocumentSummary(text: string, userId?: string): Pr
     "Summarize the following document in 3-5 sentences, capturing its actual content and purpose.",
     "Only summarize what's shown below -- never invent details the excerpt doesn't contain.",
     excerpt.length < text.length
-      ? "Note: this is only the first portion of a longer document -- summarize what's shown, don't imply it's the whole thing."
+      ? `Note: this is only the first portion of a longer document (${text.length.toLocaleString()} characters total; ${excerpt.length.toLocaleString()} shown) -- summarize what's shown, don't imply it's the whole thing.`
       : "",
     "",
     excerpt,

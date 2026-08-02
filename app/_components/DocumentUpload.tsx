@@ -1,10 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Upload } from "lucide-react";
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"];
+
+interface UploadLimit {
+  type: "uploads";
+  current: number;
+  max: number;
+  plan: string;
+  nextAvailableAt?: string;
+}
 
 export default function DocumentUpload({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -12,6 +21,39 @@ export default function DocumentUpload({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState<"idle" | "uploading">("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [uploadLimit, setUploadLimit] = useState<UploadLimit | null>(null);
+  const [countdown, setCountdown] = useState<string | null>(null);
+
+  // Live countdown timer when upload limit is reached
+  useEffect(() => {
+    if (!uploadLimit?.nextAvailableAt) {
+      setCountdown(null);
+      return;
+    }
+
+    function updateCountdown() {
+      if (!uploadLimit?.nextAvailableAt) return;
+      const target = new Date(uploadLimit.nextAvailableAt).getTime();
+      const now = Date.now();
+      const diff = target - now;
+
+      if (diff <= 0) {
+        setCountdown(null);
+        setUploadLimit(null);
+        setError(null);
+        return;
+      }
+
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+      setCountdown(`${hours}h ${minutes}m ${seconds}s`);
+    }
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [uploadLimit]);
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -27,6 +69,7 @@ export default function DocumentUpload({ projectId }: { projectId: string }) {
     setStatus("uploading");
     setProgress(0);
     setError(null);
+    setUploadLimit(null);
 
     const formData = new FormData();
     formData.append("projectId", projectId);
@@ -46,12 +89,15 @@ export default function DocumentUpload({ projectId }: { projectId: string }) {
         } else {
           const data = (() => {
             try {
-              return JSON.parse(xhr.responseText) as { error?: string };
+              return JSON.parse(xhr.responseText) as { error?: string; limit?: UploadLimit };
             } catch {
               return null;
             }
           })();
           setError(data?.error ?? "Upload failed. Try again.");
+          if (data?.limit?.type === "uploads") {
+            setUploadLimit(data.limit);
+          }
         }
         resolve();
       };
@@ -84,6 +130,19 @@ export default function DocumentUpload({ projectId }: { projectId: string }) {
         className="hidden"
       />
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {uploadLimit && countdown && (
+        <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900">
+          <p className="text-xs text-neutral-600 dark:text-neutral-400">
+            Next upload available in: <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">{countdown}</span>
+          </p>
+          <Link
+            href="/pricing"
+            className="text-burgundy mt-1.5 inline-block text-xs font-medium hover:underline"
+          >
+            Upgrade to Pro for more uploads
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

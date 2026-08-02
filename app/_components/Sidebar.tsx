@@ -7,7 +7,7 @@ import type { ConversationSummary } from "@/lib/memory/types";
 import type { OwnerProfile } from "@/lib/settings/owner-profile";
 import AccountMenu from "./AccountMenu";
 import { useConversationsRefresh } from "./ConversationsProvider";
-import { AdminIcon, CloseIcon, MenuIcon, PlusIcon, SearchIcon, WorkspaceIcon } from "./icons";
+import { AdminIcon, CloseIcon, HistoryIcon, MenuIcon, PlusIcon, SearchIcon, WorkspaceIcon } from "./icons";
 import SidebarConversationItem from "./SidebarConversationItem";
 
 function SidebarSection({ title, items }: { title: string; items: ConversationSummary[] }) {
@@ -69,16 +69,19 @@ function SidebarContent({
 
   return (
     <>
-      <button
-        onClick={startNewChat}
-        className="flex items-center gap-2 px-5 pt-6 pb-5 text-left"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element -- avoids next/image's optimizer cache for this tiny static asset */}
-        <img src="/menahem-logo.png" alt="Menahem" width={36} height={36} className="h-9 w-9" />
-        <span className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
-          Menahem
-        </span>
-      </button>
+      <div className="flex items-center gap-2 px-5 pt-6 pb-5">
+        <button
+          onClick={startNewChat}
+          className="flex items-center gap-2 text-left"
+          aria-label="Menahem home"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- avoids next/image's optimizer cache for this tiny static asset */}
+          <img src="/menahem-logo.png" alt="Menahem" width={36} height={36} className="h-9 w-9" />
+          <span className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+            Menahem
+          </span>
+        </button>
+      </div>
 
       <div className="px-4">
         <button
@@ -98,6 +101,17 @@ function SidebarContent({
         >
           <WorkspaceIcon />
           Political Workspace
+        </Link>
+      </div>
+
+      <div className="mt-2 px-4">
+        <Link
+          href="/history"
+          onClick={onNavigate}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-300 dark:hover:border-neutral-700 dark:hover:text-neutral-50"
+        >
+          <HistoryIcon />
+          History
         </Link>
       </div>
 

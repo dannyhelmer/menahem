@@ -62,6 +62,13 @@ async function runMigrations(): Promise<void> {
   `;
   await sql`CREATE INDEX IF NOT EXISTS conversations_user_id_idx ON conversations(user_id)`;
 
+  // Soft delete / trash support for conversations -- deleted_at tracks when
+  // a conversation was moved to trash, and deleted_expires_at is 30 days
+  // after that (auto-purge deadline). NULL means the conversation is live.
+  await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`;
+  await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS deleted_expires_at timestamptz`;
+  await sql`CREATE INDEX IF NOT EXISTS conversations_deleted_at_idx ON conversations(deleted_at)`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS notebook_projects (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -4,7 +4,8 @@ import type { PoliticalIntent } from "@/lib/intelligence/political-intent";
 import { buildConfidenceReason, buildResearchPacket, type ResearchPacket, type TieredSource } from "./packet";
 import { sortByAuthority } from "./source-tier";
 
-const MAX_SUBQUESTIONS = 4;
+const MAX_SUBQUESTIONS = 6;
+const DEEP_RESEARCH_SEARCH_COUNT = 15;
 const TIER_SCORE: Record<TieredSource["tier"], number> = { government: 4, news: 3, reference: 2, general: 1 };
 const CONFIDENCE_RANK: Record<ResearchPacket["confidence"], number> = { high: 3, medium: 2, low: 1 };
 
@@ -16,7 +17,10 @@ export async function decomposeQuestion(question: string, userId?: string): Prom
   if (!(await provider.isConfigured())) return [question];
 
   const prompt =
-    "Break this question into 2-4 focused sub-questions that, together, would fully answer it. " +
+    "Break this question into 3-6 focused sub-questions that, together, would fully answer it. " +
+    "Think about what dimensions a thorough researcher would cover: the core factual question, " +
+    "historical context, current status, key stakeholders or parties involved, relevant data or " +
+    "statistics, comparisons or alternatives, and potential future developments. " +
     "Reply with ONLY the sub-questions, one per line, no numbering, no explanation.\n\n" +
     `Question: ${question}`;
 
@@ -34,7 +38,7 @@ export async function decomposeQuestion(question: string, userId?: string): Prom
     .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
     .filter(Boolean);
 
-  if (lines.length === 0 || lines.length > 6) return [question];
+  if (lines.length === 0 || lines.length > 8) return [question];
   return lines.slice(0, MAX_SUBQUESTIONS);
 }
 
@@ -51,7 +55,9 @@ export async function runDeepResearch(
 
   onStage?.("Searching sources");
   const packets = await Promise.all(
-    subquestions.map((sub) => buildResearchPacket(sub, intents, jurisdiction, state)),
+    subquestions.map((sub) =>
+      buildResearchPacket(sub, intents, jurisdiction, state, { maxSearchResults: DEEP_RESEARCH_SEARCH_COUNT }),
+    ),
   );
 
   onStage?.("Comparing findings");
@@ -75,10 +81,23 @@ export async function runDeepResearch(
   const sections = packets.map((packet, i) => `Sub-question: ${subquestions[i]}\n\n${packet.liveData}`);
 
   const liveData = [
-    `Deep Research: this question was broken into ${subquestions.length} sub-question(s), each researched independently.`,
-    "Compare claims across sub-questions -- where they agree, say so; where they conflict, point out the " +
-      "conflict explicitly rather than silently picking one. Structure your answer as: Summary, Detailed " +
-      "Findings, Sources.",
+    `Deep Research: this question was broken into ${subquestions.length} sub-question(s), each researched independently with ${DEEP_RESEARCH_SEARCH_COUNT} sources searched per sub-question.`,
+    "This is a DEEP RESEARCH report -- produce roughly 2-3x more detailed output than a normal answer. " +
+      "Compare claims across sub-questions -- where they agree, say so; where they conflict, point out the " +
+      "conflict explicitly rather than silently picking one. " +
+      "Structure your answer with these sections: " +
+      "(1) Executive Summary -- a concise overview of the key findings; " +
+      "(2) Detailed Findings -- the full analysis organized by theme or sub-question, with each claim sourced; " +
+      "(3) Timeline -- if the topic has a chronological dimension, present key events with dates in a timeline format; " +
+      "(4) Comparisons -- use tables when comparing multiple items (candidates, bills, policies, jurisdictions) " +
+      "so the reader can see differences at a glance; " +
+      "(5) Multiple Viewpoints -- where genuine disagreement exists, present each viewpoint with its supporting " +
+      "evidence and name who holds it; " +
+      "(6) Confidence Assessment -- state your confidence level (High/Medium/Low) and explain what evidence " +
+      "supports it and what gaps remain; " +
+      "(7) Sources -- list all sources cited. " +
+      "Use markdown tables where they genuinely improve readability. Use headings (##) for each section. " +
+      "Be thorough and specific -- this is a research report, not a chat reply.",
     ...sections,
   ].join("\n\n---\n\n");
 

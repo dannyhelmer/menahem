@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Plus, Lock } from "lucide-react";
 import type { ResearchProject } from "@/lib/notebook/types";
 
 export default function CreateProjectForm() {
@@ -11,6 +12,17 @@ export default function CreateProjectForm() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [isPro, setIsPro] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/usage")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setIsPro(data.isPro ?? false);
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -18,12 +30,19 @@ export default function CreateProjectForm() {
     if (!trimmed || submitting) return;
 
     setSubmitting(true);
+    setError(null);
     try {
       const response = await fetch("/api/notebook/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmed, description: description.trim() }),
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        setError(data?.error ?? "Failed to create project.");
+        setSubmitting(false);
+        return;
+      }
       const project = (await response.json()) as ResearchProject;
       router.push(`/workspace/projects/${project.id}`);
     } finally {
@@ -31,11 +50,33 @@ export default function CreateProjectForm() {
     }
   }
 
+  // Free users see an upgrade prompt instead of the New Project form
+  if (isPro === false) {
+    return (
+      <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-6 text-center dark:border-neutral-800 dark:bg-neutral-900">
+        <Lock className="mx-auto mb-3 h-6 w-6 text-neutral-400" aria-hidden="true" />
+        <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+          Political Workspace is a Pro feature
+        </h3>
+        <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+          Upgrade to Pro to create research projects with notes, citations, uploaded files, and linked conversations.
+        </p>
+        <Link
+          href="/pricing"
+          className="bg-burgundy hover:bg-burgundy-dark mt-4 inline-block rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150"
+        >
+          Upgrade to Pro
+        </Link>
+      </div>
+    );
+  }
+
   if (!open) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="bg-burgundy hover:bg-burgundy-dark flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-colors duration-150"
+        disabled={isPro === null}
+        className="bg-burgundy hover:bg-burgundy-dark flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-colors duration-150 disabled:opacity-50"
       >
         <Plus className="h-4 w-4" aria-hidden="true" />
         New Project

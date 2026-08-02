@@ -3,6 +3,9 @@ import { ensureSchema } from "@/lib/db/schema";
 import { sql } from "@/lib/db/client";
 import type { Citation, ResearchNote, ResearchProject } from "./types";
 
+export const MAX_NOTES_PER_PROJECT = 10;
+export const MAX_CITATIONS_PER_PROJECT = 10;
+
 interface ProjectRow {
   id: string;
   name: string;
@@ -97,7 +100,12 @@ export async function deleteProject(id: string, userId: string): Promise<void> {
   await sql`DELETE FROM notebook_projects WHERE id = ${id} AND user_id = ${userId}`;
 }
 
-export async function addNote(id: string, userId: string, text: string): Promise<ResearchNote | null> {
+export async function addNote(id: string, userId: string, text: string): Promise<ResearchNote | { error: string } | null> {
+  const existing = await getProject(id, userId);
+  if (!existing) return null;
+  if (existing.notes.length >= MAX_NOTES_PER_PROJECT) {
+    return { error: `You've reached the limit of ${MAX_NOTES_PER_PROJECT} notes per project. Delete an existing note to add a new one.` };
+  }
   const note: ResearchNote = { id: randomUUID(), text, createdAt: new Date().toISOString() };
   const project = await updateProject(id, userId, (p) => p.notes.push(note));
   return project ? note : null;
@@ -109,7 +117,12 @@ export async function deleteNote(id: string, userId: string, noteId: string): Pr
   });
 }
 
-export async function addCitation(id: string, userId: string, title: string, url: string): Promise<Citation | null> {
+export async function addCitation(id: string, userId: string, title: string, url: string): Promise<Citation | { error: string } | null> {
+  const existing = await getProject(id, userId);
+  if (!existing) return null;
+  if (existing.citations.length >= MAX_CITATIONS_PER_PROJECT) {
+    return { error: `You've reached the limit of ${MAX_CITATIONS_PER_PROJECT} citations per project. Delete an existing citation to add a new one.` };
+  }
   const citation: Citation = { id: randomUUID(), title, url, addedAt: new Date().toISOString() };
   const project = await updateProject(id, userId, (p) => p.citations.push(citation));
   return project ? citation : null;

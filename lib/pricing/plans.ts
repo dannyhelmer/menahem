@@ -62,6 +62,7 @@ export const PRICING_PLANS: PricingPlan[] = [
       { text: "Standard response speed" },
     ],
     limitations: [
+      { text: "Political Workspace projects", excluded: true },
       { text: "Deep Research mode", excluded: true },
       { text: "Multi-document analysis", excluded: true },
       { text: "Export research", excluded: true },
@@ -81,6 +82,7 @@ export const PRICING_PLANS: PricingPlan[] = [
     ctaHref: "/signup",
     features: [
       { text: "2,500 AI messages per month" },
+      { text: "Political Workspace projects" },
       { text: "Deep Research mode" },
       { text: "Advanced government intelligence" },
       { text: "Upload up to 100 documents per month" },

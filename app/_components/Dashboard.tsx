@@ -81,10 +81,10 @@ export default function Dashboard({
       <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-10">
         <div className="space-y-3 text-center">
           <h1 className="text-4xl font-semibold tracking-tight text-neutral-900 sm:text-5xl dark:text-neutral-50">
-            Understand Government Faster
+            Menahem
           </h1>
           <p className="mx-auto max-w-2xl text-lg text-neutral-500 dark:text-neutral-400">
-            AI-powered research for legislation, public policy, budgets, court opinions, and official government sources.
+            AI-powered research for legislation, public policy, and official government sources.
           </p>
         </div>
 

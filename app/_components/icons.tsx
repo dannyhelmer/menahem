@@ -24,6 +24,7 @@ import {
   X,
   Menu,
   CreditCard,
+  Clock,
 } from "lucide-react";
 
 export function SendIcon() {
@@ -104,4 +105,8 @@ export function MenuIcon() {
 
 export function PricingIcon() {
   return <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />;
+}
+
+export function HistoryIcon() {
+  return <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />;
 }

@@ -23,6 +23,7 @@ import { classifyPoliticalIntents, isPoliticalQuestion, type PoliticalIntent } f
 import { requiresLiveData, VERIFICATION_FAILED_MESSAGE } from "@/lib/intelligence/requires-live-data";
 import { CATEGORY_LABELS, classify } from "@/lib/intelligence/task-classifier";
 import { getDocument, getDocumentText } from "@/lib/documents/store";
+import { getProject } from "@/lib/notebook/store";
 import { getResearchCategory } from "@/lib/research-categories/config";
 import {
   detectEntityLookupNeed,
@@ -82,22 +83,37 @@ function pickPrimaryIntent(intents: Set<PoliticalIntent>): PoliticalIntent {
   return "political";
 }
 
-const MAX_DOCUMENT_CONTEXT_LENGTH = 12_000;
+const MAX_DOCUMENT_CONTEXT_LENGTH = 50_000;
 
 // Phase 15: folds an uploaded document's real, extracted text into liveData
 // -- capped so a long PDF can't crowd out the rest of the context window.
 // Never pretends to have read more than what's actually shown.
+// For large documents (100+ pages), the text is chunked with page markers
+// so citations can reference the correct section, and the model is told
+// the total document length so it knows how much was omitted.
 async function buildDocumentContext(documentId: string, userId: string): Promise<string | null> {
   const [document, text] = await Promise.all([getDocument(documentId, userId), getDocumentText(documentId, userId)]);
   if (!document || !text) return null;
 
+  const totalLength = text.length;
   const excerpt = text.slice(0, MAX_DOCUMENT_CONTEXT_LENGTH);
-  const truncated = excerpt.length < text.length;
+  const truncated = excerpt.length < totalLength;
+
+  // Insert page markers every ~3000 characters (roughly one page of text)
+  // so the model can reference approximate page locations in citations.
+  // [\s\S] (not a bare `.`) is required -- `.` doesn't match newlines, so
+  // this would never actually fire on real extracted PDF text (which is
+  // full of line breaks), silently disabling page markers entirely.
+  const chunked = excerpt.replace(/([\s\S]{3000})/g, "$1\n[--- page break ---]\n");
+
   return [
     `Uploaded document "${document.filename}" -- use ONLY this content to answer questions about it, cite it by ` +
       "filename, and say plainly if it doesn't contain the answer rather than guessing." +
-      (truncated ? " Only the first portion of this document is shown below." : ""),
-    excerpt,
+      (truncated
+        ? ` This document is ${totalLength.toLocaleString()} characters total; only the first ${excerpt.length.toLocaleString()} characters are shown below. If the user asks about content that might be in the omitted portion, say plainly that you can only see the first portion of the document.`
+        : " The complete document is shown below."),
+    "Page breaks are marked with [--- page break ---] -- use these to reference approximate locations when citing.",
+    chunked,
   ].join("\n\n");
 }
 
@@ -163,7 +179,7 @@ interface RouteOutcome {
   resolvedUserText: string;
 }
 
-const DEEP_RESEARCH_MAX_TOKENS = 6000;
+const DEEP_RESEARCH_MAX_TOKENS = 12000;
 
 async function routeMessage(
   text: string,
@@ -174,6 +190,7 @@ async function routeMessage(
   userId: string,
   categorySlug?: string,
   documentId?: string,
+  projectId?: string,
 ): Promise<RouteOutcome> {
   text = resolveJurisdictionReply(text, messagesSnapshot);
 
@@ -198,6 +215,20 @@ async function routeMessage(
   // applies regardless of which branch below handles the message.
   const documentContext = documentId ? await buildDocumentContext(documentId, userId) : null;
   if (documentContext) liveDataParts.push(documentContext);
+
+  // Political Workspace project context -- a project's description is
+  // permanent background for every AI response inside that project, not
+  // just a label shown in the UI. Silently omitted if the project can't be
+  // found (deleted, or doesn't belong to this user).
+  if (projectId) {
+    const project = await getProject(projectId, userId);
+    if (project?.description.trim()) {
+      liveDataParts.push(
+        `Project context for "${project.name}" -- treat this as standing background for every question asked ` +
+          `inside this workspace, not just this one message:\n\n${project.description.trim()}`,
+      );
+    }
+  }
 
   if (isFastPathMessage(text)) {
     if (isSystemTestMessage(text)) liveDataParts.push(SYSTEM_TEST_GUIDANCE);
@@ -397,6 +428,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
     deepResearchEnabled,
     category: categorySlug,
     documentId,
+    projectId,
     continuation,
   } = (await request.json()) as {
     messages?: ChatMessage[];
@@ -405,6 +437,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
     deepResearchEnabled?: boolean;
     category?: string;
     documentId?: string;
+    projectId?: string;
     continuation?: boolean;
   };
 
@@ -545,6 +578,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
           user.id,
           categorySlug,
           documentId,
+          projectId,
         );
 
         // The actual "citation referencing the uploaded document" (Phase 15) --
