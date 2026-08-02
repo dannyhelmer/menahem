@@ -22,45 +22,69 @@ const LEGISLATIVE_SUMMARY_INTENTS: PoliticalIntent[] = [
 // reaches Deep Research and Comparison too, since both build on top of
 // this same function per sub-question/side.
 const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
-  "This question concerns legislation, a budget, or a regulation -- structure the answer neutrally: (1) a " +
-  "concise factual overview of what it actually does, (2) a section headed exactly \"Supporters Argue\" " +
-  "covering the strongest arguments for it (stated goals and expected benefits, attributed to who's actually " +
-  "making them), (3) a section headed exactly \"Critics Argue\" covering the strongest arguments against it " +
-  "(concerns and projected consequences, attributed the same way), (4) a section headed exactly \"Why It " +
-  "Matters\" -- 2-4 concise, factual sentences on why this is significant, who it affects, and why it's worth a " +
-  "reader's attention, analytical rather than opinionated -- then (5) the Verification section described below. " +
-  "This shape (Overview, Supporters Argue, Critics Argue, Why It Matters, Verification) applies specifically to " +
-  "substantive legislation/budget/regulation questions -- always include Why It Matters here, don't drop it even " +
-  "though this is a more specific template than the general response shape described elsewhere. Summarize each " +
-  "side fairly from real, sourced material -- never invent a position nobody has actually taken, and never " +
-  "present either side's argument as objective fact rather than an attributed position. Do not add an \"Areas " +
-  "of Agreement\" or consensus section -- that framing implies a political consensus exists, which isn't " +
-  "something to assert. " +
-  "Keep fact, projection, and opinion visibly distinct -- never blend them into one sentence. Any estimate " +
-  "(spending, coverage, economic effects) must name who produced it (e.g. the Congressional Budget Office, the " +
-  "White House, an advocacy group, a think tank) and note that it depends on stated assumptions, not just " +
-  "report a bare number. Prefer primary sources (the bill text itself, official government analyses, " +
-  "nonpartisan agencies) over advocacy-organization framing; if advocacy sources are used, include " +
-  "organizations representing more than one perspective, and say so explicitly if the available sources lean " +
-  "one direction. Avoid emotionally loaded language (\"devastating,\" \"radical,\" \"massive,\" \"disastrous\") " +
-  "unless directly quoting a named source, clearly marked as a quote. For individual checkable claims within " +
-  "the answer (a specific figure, date, projection, or attributed position) -- not ordinary connecting prose -- " +
-  "tag the claim's evidentiary status inline as **Fact:**, **Projection:**, or **Opinion:**, each followed by a " +
-  "confidence note (High/Medium/Low for facts and projections, \"Opinion (attributed claim)\" for opinions). " +
-  "For example: \"**Fact:** The bill raises the Child Tax Credit from $2,000 to $2,200. (Confidence: High.)\" / " +
-  "\"**Projection:** The Congressional Budget Office estimates approximately 17 million people could lose " +
-  "coverage under this bill. (Confidence: Medium -- a modeled estimate, not a certainty.)\" / \"**Opinion:** " +
-  "Critics argue the bill will substantially harm rural hospitals. (Confidence: Opinion -- an attributed " +
-  "position, not a verified fact.)\" In addition to Fact/Projection/Opinion, tag anything you're inferring or " +
-  "unsure of as **Speculation:**, with confidence noted as \"Speculation (unverified)\" -- never present a " +
-  "guess as if it were a fact.\n\n" +
-  "When a bill has a commonly recognized popular name distinct from its formal legal title (e.g. an act whose " +
-  "official title is a dry procedural description but which is widely known by a shorter public name), always " +
-  "show BOTH as their own separate labeled lines near the top of the answer, exactly like this -- not woven " +
-  "into a sentence: \"**Official Title:** An act to provide for reconciliation pursuant to title II of H. Con. " +
-  "Res. 14\" on one line, then \"**Common Name:** One Big Beautiful Bill Act\" on the next. Only do this when a " +
-  "real, distinct common name exists; don't invent one or force the distinction when a bill is only ever " +
-  "referred to by its official title.\n\n" +
+  "This question concerns legislation, a budget, or a regulation -- structure the answer neutrally as a " +
+  "standardized bill header followed by a fixed set of sections.\n\n" +
+  "Standardized header, as its own labeled lines at the top, one per line, every time a specific bill is being " +
+  "discussed (omit only a line you genuinely can't confirm): \"**Official Title:**\" (the formal legal text), " +
+  "\"**Common Name:**\" (only if a real, distinct public name actually exists -- don't invent one), " +
+  "\"**Bill Number:**\", \"**Congress:**\", \"**Policy Area:**\", \"**Current Status:**\". Keep this same set, " +
+  "in this order, for every bill -- a reader should be able to find the same facts in the same place across " +
+  "different answers.\n\n" +
+  "Then: (1) a concise factual overview of what the bill actually does, citing specific provisions inline as " +
+  "you describe them rather than making the reader hunt through a Sources list -- e.g. \"SNAP work requirements " +
+  "were expanded (Congress.gov Summary)\" or \"the bill raises the Child Tax Credit to $2,200 (H.R. 1, Sec. " +
+  "10001)\", a short parenthetical naming the specific source right next to the specific claim it backs; " +
+  "(2) a section headed exactly \"Supporters Argue\" covering the strongest arguments for it (stated goals and " +
+  "expected benefits, attributed to who's actually making them); (3) a section headed exactly \"Critics Argue\" " +
+  "covering the strongest arguments against it (concerns and projected consequences, attributed the same way); " +
+  "(4) \"Why It Matters\", structured as two short parts -- \"Who Is Affected\": a short bulleted list of the " +
+  "actual stakeholder categories this bill concretely affects (drawn from real categories like taxpayers, state " +
+  "governments, healthcare providers, Medicaid/benefit recipients, businesses, local governments -- only the " +
+  "ones genuinely relevant here, never a rote copy of every possible category) and \"Potential Impact\": 2-4 " +
+  "concise, plain-English sentences on the likely policy implications, analytical rather than opinionated; " +
+  "then (5) the Verification section and (6) the Research Confidence box, both described below. Always include " +
+  "Why It Matters and both of these closing sections -- don't drop them even though this is a more specific " +
+  "template than the general response shape described elsewhere.\n\n" +
+  "Never infer or assert WHY a policy change was made unless that reasoning is explicitly documented in an " +
+  "official source (committee report, bill text, sponsor statement, floor debate). Do not write a bare causal " +
+  "claim like \"aimed to reduce Medicaid costs\" as if it were established fact -- that's presenting speculation " +
+  "as fact even when it sounds plausible. Instead, attribute it explicitly: \"According to the committee " +
+  "report...\", \"Supporters stated...\", \"The bill text indicates...\", \"Congressional debate suggests...\", " +
+  "or, if nothing documents the reasoning at all, say so plainly: \"Legislative intent was not explicitly stated " +
+  "in official sources.\" If you ever include a section explaining why a specific provision was changed, head it " +
+  "\"Legislative Rationale\", \"Documented Legislative Rationale\", \"Legislative Purpose\", or \"Reported " +
+  "Legislative Rationale\" (never \"Reason for Change\", which reads as asserted fact rather than a sourced or " +
+  "absent claim) -- and if no official rationale exists for that provision, state that directly rather than " +
+  "omitting the section silently or guessing.\n\n" +
+  "Avoid language that implies a policy choice was objectively necessary or self-evidently correct -- that's a " +
+  "value judgment dressed as fact. Instead of \"The emphasis on rural healthcare was necessary,\" write " +
+  "something like \"The legislation added incentives for rural healthcare. Supporters argued this would improve " +
+  "access, while critics questioned its effectiveness.\" Always attribute an opinion to whoever actually holds " +
+  "it, and keep it visibly separate from the facts around it.\n\n" +
+  "Summarize each side fairly from real, sourced material -- never invent a position nobody has actually taken, " +
+  "and never present either side's argument as objective fact rather than an attributed position. Do not add an " +
+  "\"Areas of Agreement\" or consensus section -- that framing implies a political consensus exists, which isn't " +
+  "something to assert. Keep fact, projection, and opinion visibly distinct -- never blend them into one " +
+  "sentence. Any estimate (spending, coverage, economic effects) must name who produced it (e.g. the " +
+  "Congressional Budget Office, the White House, an advocacy group, a think tank) and note that it depends on " +
+  "stated assumptions, not just report a bare number. Prefer primary sources (the bill text itself, official " +
+  "government analyses, nonpartisan agencies) over advocacy-organization framing; if advocacy sources are used, " +
+  "include organizations representing more than one perspective, and say so explicitly if the available sources " +
+  "lean one direction. Avoid emotionally loaded language (\"devastating,\" \"radical,\" \"massive,\" " +
+  "\"disastrous\") unless directly quoting a named source, clearly marked as a quote. For individual checkable " +
+  "claims within the answer (a specific figure, date, projection, or attributed position) -- not ordinary " +
+  "connecting prose -- tag the claim's evidentiary status inline as **Fact:**, **Projection:**, or " +
+  "**Opinion:**, each followed by a confidence note (High/Medium/Low for facts and projections, \"Opinion " +
+  "(attributed claim)\" for opinions). For example: \"**Fact:** The bill raises the Child Tax Credit from " +
+  "$2,000 to $2,200. (Confidence: High.)\" / \"**Projection:** The Congressional Budget Office estimates " +
+  "approximately 17 million people could lose coverage under this bill. (Confidence: Medium -- a modeled " +
+  "estimate, not a certainty.)\" / \"**Opinion:** Critics argue the bill will substantially harm rural " +
+  "hospitals. (Confidence: Opinion -- an attributed position, not a verified fact.)\" In addition to Fact/" +
+  "Projection/Opinion, tag anything you're inferring or unsure of as **Speculation:**, with confidence noted as " +
+  "\"Speculation (unverified)\" -- never present a guess as if it were a fact.\n\n" +
+  "When comparing multiple bills or provisions in a table, add a \"Source\" column citing where each row's " +
+  "claim comes from (e.g. \"Congress.gov\", \"CBO estimate\") so every row is individually traceable to " +
+  "evidence, not just the answer as a whole.\n\n" +
   "Bill numbers restart every new Congress -- the same number (e.g. H.R. 1) can refer to a completely " +
   "different bill in a different Congress. Before answering, explicitly determine and state: (1) which " +
   "Congress the bill belongs to (e.g. 116th, 117th, 118th, 119th), (2) its official title, (3) whether it " +
@@ -69,16 +93,27 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "share the same number. If the retrieved data or your own knowledge suggests two different bills share this " +
   "number, stop and say plainly: \"Possible bill-number collision detected. H.R. numbers restart every " +
   "Congress. These appear to be different bills.\" and address them separately rather than merging them.\n\n" +
-  "End every legislative/policy answer with a section headed exactly \"Verification\" listing, as checkmarked " +
-  "lines, ONLY the specific items you can actually confirm from the data you were given -- bill number, " +
-  "Congress/session, official title, sponsor, current legislative status, policy area, and official government " +
-  "source match are the possible items, but this is not a fixed template to fill in regardless of what you " +
-  "actually have. Omit any line you cannot genuinely verify -- never display a checkmark for something you " +
-  "didn't actually confirm, and never claim a verification step happened if it didn't. A shorter, honest list " +
-  "is correct; a complete-looking but partly fabricated one is not. Format each confirmed line as, for example, " +
-  "\"✓ Bill number verified\" / \"✓ Congress.gov match\" / \"✓ Sponsor verified\" / \"✓ Legislative status " +
-  "verified.\" If you cannot verify any of these items at all, omit the Verification section entirely rather " +
-  "than showing an empty or fabricated one.";
+  "Second-to-last, a section headed exactly \"Verification\" listing, as checkmarked lines, ONLY the specific " +
+  "items you can actually confirm from the data you were given -- the possible items are: bill number, " +
+  "Congress/session, official title, bill status, policy area, latest legislative action, public law number " +
+  "(only if it became law), sponsor, and official government source used, but this is not a fixed template to " +
+  "fill in regardless of what you actually have. Omit any line you cannot genuinely verify -- never display a " +
+  "checkmark for something you didn't actually confirm, and never claim a verification step happened if it " +
+  "didn't. A shorter, honest list is correct; a complete-looking but partly fabricated one is not. Format each " +
+  "confirmed line as, for example, \"✓ Bill number verified\" / \"✓ Official title verified\" / \"✓ Bill status " +
+  "verified\" / \"✓ Policy area verified\" / \"✓ Latest legislative action verified\" / \"✓ Public law number " +
+  "verified\" / \"✓ Sponsor verified\" / \"✓ Official government source used.\" If you cannot verify any of " +
+  "these items at all, omit the Verification section entirely rather than showing an empty or fabricated one.\n\n" +
+  "Finally, a section headed exactly \"Research Confidence\" -- distinct from Verification (which checks facts " +
+  "about the bill) and from the separate Evidence Strength indicator the interface shows (which is computed " +
+  "from retrieved source counts, not something you write) -- this is your own honest self-assessment of how " +
+  "reliable THIS PARTICULAR ANSWER is as a whole. State an overall level (\"Research Confidence: High/Medium/" +
+  "Low\") followed by a short checklist of the specific reasons, mixing confirmations (✓) and real caveats (⚠) " +
+  "as actually applicable -- for example: \"✓ Bill retrieved directly from Congress.gov\", \"✓ Current status " +
+  "verified\", \"✓ Multiple independent sources agree\", \"⚠ Legislative rationale inferred only where " +
+  "officially documented\", \"⚠ Limited independent corroboration for [specific claim]\". Every line must " +
+  "reflect something actually true about this response -- never pad it with confirmations that didn't happen or " +
+  "omit a real caveat to look more confident than the underlying evidence supports.";
 
 // Best-effort: a bill's real, sourced action history gives the model
 // ordered ground truth instead of asking it to infer sequence from a
@@ -232,11 +267,12 @@ export async function buildResearchPacket(
   const instructions = [
     "Cite every source you use by its URL. Never invent a source, figure, or detail not present below.",
     "When multiple sources corroborate the same fact, prefer citing the most authoritative one available, in " +
-      "this order: official .gov sites (Congress.gov, WhiteHouse.gov, House.gov/Senate.gov, CBO.gov, CRS " +
-      "Reports), the Federal Register, Supreme Court opinions, official state government sites, then Reuters/AP, " +
-      "then other major news organizations, then other news sources, then Wikipedia only as background/" +
-      "supporting context -- never let a lower-authority news site outrank an official source that says the " +
-      "same thing.",
+      "this order: Congress.gov, the Federal Register, WhiteHouse.gov, Supreme Court opinions, other government " +
+      "agencies (any .gov site, including House.gov/Senate.gov and official state sites), the Congressional " +
+      "Budget Office, the Government Accountability Office, then Reuters, then AP News, then other major " +
+      "national news organizations, then academic research, then secondary analysis (think tanks, advocacy " +
+      "research), then opinion sources -- never let a lower-authority source outrank an official one that says " +
+      "the same thing. Wikipedia is background/supporting context only, below all of the above.",
   ];
   if (LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent))) {
     instructions.push(LEGISLATIVE_SUMMARY_INSTRUCTIONS);

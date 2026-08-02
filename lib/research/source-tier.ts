@@ -74,15 +74,22 @@ export function sourceTierScore(url: string): number {
 // calculation elsewhere still uses the coarser SourceTier. Checked
 // most-specific-first (crsreports.congress.gov before the general
 // congress.gov suffix, etc.).
+// Order follows the product's stated priority: Congress.gov, Federal
+// Register, WhiteHouse.gov, Supreme Court, other government agencies (.gov),
+// CBO, GAO, Reuters, AP, other major national news, academic research,
+// secondary analysis, opinion sources, Wikipedia last.
 const AUTHORITY_RULES: [(host: string) => boolean, number][] = [
   [(h) => h === "congress.gov", 100],
-  [(h) => h === "whitehouse.gov", 100],
-  [(h) => h === "crsreports.congress.gov", 85],
-  [(h) => h.endsWith(".house.gov") || h === "house.gov", 95],
-  [(h) => h.endsWith(".senate.gov") || h === "senate.gov", 95],
-  [(h) => h === "cbo.gov", 90],
-  [(h) => h === "federalregister.gov", 80],
-  [(h) => h === "supremecourt.gov", 75],
+  [(h) => h === "crsreports.congress.gov", 97],
+  [(h) => h === "federalregister.gov", 96],
+  [(h) => h === "whitehouse.gov", 94],
+  [(h) => h === "supremecourt.gov", 92],
+  [(h) => h.endsWith(".house.gov") || h === "house.gov", 90],
+  [(h) => h.endsWith(".senate.gov") || h === "senate.gov", 90],
+  [(h) => h === "cbo.gov", 85],
+  [(h) => h === "gao.gov", 84],
+  [(h) => h === "reuters.com", 80],
+  [(h) => h === "apnews.com", 79],
 ];
 
 export function sourceAuthorityRank(url: string): number {
@@ -92,11 +99,12 @@ export function sourceAuthorityRank(url: string): number {
   for (const [test, rank] of AUTHORITY_RULES) {
     if (test(bareHost)) return rank;
   }
-  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return 65; // other federal/state government
-  if (WIRE_SERVICE_DOMAINS.has(bareHost)) return 55;
-  if (NATIONAL_NEWS_DOMAINS.has(bareHost)) return 40;
-  if (LOCAL_NEWS_DOMAINS.has(bareHost)) return 30;
-  if (REFERENCE_DOMAINS.has(bareHost) || bareHost.endsWith(".edu")) return 20;
+  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return 70; // other federal/state government agencies
+  if (WIRE_SERVICE_DOMAINS.has(bareHost)) return 60; // other wire services (Bloomberg, FT, BBC, NPR)
+  if (NATIONAL_NEWS_DOMAINS.has(bareHost)) return 45; // other major national news organizations
+  if (bareHost.endsWith(".edu")) return 35; // academic research
+  if (REFERENCE_DOMAINS.has(bareHost)) return 25; // secondary analysis (think tanks, advocacy research, reference sites)
+  if (LOCAL_NEWS_DOMAINS.has(bareHost)) return 22; // local news
   if (isWikipedia(url)) return 5; // background only -- never outranks a real primary source
   return 10;
 }

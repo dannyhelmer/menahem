@@ -7,7 +7,7 @@ export function buildFollowupSuggestions(intents: Set<PoliticalIntent>): string[
     return ["Look at a third option", "See full profile for each", "Which has more support?"];
   }
   if (intents.has("federal_legislation") || intents.has("state_legislation")) {
-    return ["Who sponsored this bill?", "What's its current status?", "Related legislation"];
+    return ["Who sponsored this bill?", "What amendments were adopted?", "Who voted against it?", "What happens next?"];
   }
   if (intents.has("campaign_finance")) {
     return ["Who are the top donors?", "Compare with another candidate", "Independent expenditures"];
