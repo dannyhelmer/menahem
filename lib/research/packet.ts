@@ -26,10 +26,16 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "concise factual overview of what it actually does, (2) a section headed exactly \"Supporters Argue\" " +
   "covering the strongest arguments for it (stated goals and expected benefits, attributed to who's actually " +
   "making them), (3) a section headed exactly \"Critics Argue\" covering the strongest arguments against it " +
-  "(concerns and projected consequences, attributed the same way). Summarize each side fairly from real, " +
-  "sourced material -- never invent a position nobody has actually taken, and never present either side's " +
-  "argument as objective fact rather than an attributed position. Do not add an \"Areas of Agreement\" or " +
-  "consensus section -- that framing implies a political consensus exists, which isn't something to assert. " +
+  "(concerns and projected consequences, attributed the same way), (4) a section headed exactly \"Why It " +
+  "Matters\" -- 2-4 concise, factual sentences on why this is significant, who it affects, and why it's worth a " +
+  "reader's attention, analytical rather than opinionated -- then (5) the Verification section described below. " +
+  "This shape (Overview, Supporters Argue, Critics Argue, Why It Matters, Verification) applies specifically to " +
+  "substantive legislation/budget/regulation questions -- always include Why It Matters here, don't drop it even " +
+  "though this is a more specific template than the general response shape described elsewhere. Summarize each " +
+  "side fairly from real, sourced material -- never invent a position nobody has actually taken, and never " +
+  "present either side's argument as objective fact rather than an attributed position. Do not add an \"Areas " +
+  "of Agreement\" or consensus section -- that framing implies a political consensus exists, which isn't " +
+  "something to assert. " +
   "Keep fact, projection, and opinion visibly distinct -- never blend them into one sentence. Any estimate " +
   "(spending, coverage, economic effects) must name who produced it (e.g. the Congressional Budget Office, the " +
   "White House, an advocacy group, a think tank) and note that it depends on stated assumptions, not just " +
@@ -49,10 +55,12 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "unsure of as **Speculation:**, with confidence noted as \"Speculation (unverified)\" -- never present a " +
   "guess as if it were a fact.\n\n" +
   "When a bill has a commonly recognized popular name distinct from its formal legal title (e.g. an act whose " +
-  "official title is a dry procedural description but which is widely known by a shorter public name), state " +
-  "both explicitly and label which is which -- \"Official Title\" for the formal legal text, \"Common Name\" " +
-  "for the name it's actually known by. Only do this when a real, distinct common name exists; don't invent one " +
-  "or force the distinction when a bill is only ever referred to by its official title.\n\n" +
+  "official title is a dry procedural description but which is widely known by a shorter public name), always " +
+  "show BOTH as their own separate labeled lines near the top of the answer, exactly like this -- not woven " +
+  "into a sentence: \"**Official Title:** An act to provide for reconciliation pursuant to title II of H. Con. " +
+  "Res. 14\" on one line, then \"**Common Name:** One Big Beautiful Bill Act\" on the next. Only do this when a " +
+  "real, distinct common name exists; don't invent one or force the distinction when a bill is only ever " +
+  "referred to by its official title.\n\n" +
   "Bill numbers restart every new Congress -- the same number (e.g. H.R. 1) can refer to a completely " +
   "different bill in a different Congress. Before answering, explicitly determine and state: (1) which " +
   "Congress the bill belongs to (e.g. 116th, 117th, 118th, 119th), (2) its official title, (3) whether it " +
