@@ -4,7 +4,7 @@ import { GOV_DATA_PROVIDERS } from "@/lib/gov-data/registry";
 import type { GovDataProvider } from "@/lib/gov-data/types";
 import { getConnectedEntities } from "@/lib/graph/store";
 import { getTimeline } from "@/lib/timeline/store";
-import { runSearchForMessage } from "@/lib/search/orchestrate";
+import { runSearchWithRetry } from "@/lib/search/orchestrate";
 import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
 import { sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
 
@@ -295,12 +295,28 @@ export async function buildResearchPacket(
     }
   }
 
-  const searchResult = await runSearchForMessage(question, maxSearchResults, { preferRecent: detectRecencyNeed(question) });
+  const searchResult = await runSearchWithRetry(question, maxSearchResults, {
+    preferRecent: detectRecencyNeed(question),
+  });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
     for (const s of searchResult.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url) });
+    // Only flag this to the model when nothing else in the packet already
+    // confirms the answer -- a direct government-data-provider hit means
+    // overall confidence is fine even if this supplementary web search
+    // separately came up weak after its own automatic retry.
+    if (searchResult.stillWeak && !directGovHit) {
+      liveDataParts.push(
+        "Retrieval note: search was automatically retried with a broadened query after the first pass was " +
+          "evaluated as insufficient (no authoritative source, thin corroboration) -- this already happened, " +
+          "don't tell the user you're about to search again. The results above are the best available after " +
+          "that retry but still fall short of strong evidence. State plainly what was found and that it isn't " +
+          "strongly corroborated, then ask whether the user would like your best general-knowledge answer " +
+          "instead, clearly labeled as unverified.",
+      );
+    }
   } else if (searchResult.note) {
-    liveDataParts.push(searchResult.note);
+    liveDataParts.push(searchResult.note + (searchResult.retried ? " (already retried once with a broadened query)" : ""));
   }
 
   const governmentSourceCount = sources.filter((s) => s.tier === "government").length;

@@ -1,15 +1,18 @@
 import { fetchPageText } from "./fetch";
 import { getConfiguredProviders } from "./registry";
 import type { SearchProvider, SearchResult } from "./types";
-import { sourceAuthorityRank } from "@/lib/research/source-tier";
+import { sourceAuthorityRank, sourceTier } from "@/lib/research/source-tier";
 
 const MAX_PAGES_TO_FETCH = 8;
 // Per-source fetches run in parallel (see below), so this bounds total
 // search-phase wall-clock time regardless of how many candidates there are
 // -- previously fetches ran sequentially (up to 8 x 8s = ~64s worst case),
 // which alone could blow well past any reasonable response time before the
-// model was ever even invoked.
-const SEARCH_PHASE_TIMEOUT_MS = 15_000;
+// model was ever even invoked. Kept under 12s (rather than the older 15s) so
+// that runSearchWithRetry's initial-attempt-plus-retry can both complete
+// inside the caller's own outer SEARCH_TIMEOUT_MS budget instead of the
+// retry getting cut off mid-flight.
+const SEARCH_PHASE_TIMEOUT_MS = 11_000;
 
 const FRIENDLY_SOURCE_NAMES: Record<string, string> = {
   "reuters.com": "Reuters",
@@ -252,5 +255,96 @@ export async function runSearchForMessage(
     success: true,
     liveData: lines.join("\n"),
     sources: candidates.map((c) => ({ title: c.title, url: c.url })),
+  };
+}
+
+export interface SearchWithRetryOutcome extends SearchOutcome {
+  // Whether a second, broadened attempt actually ran (the first pass found
+  // it insufficient).
+  retried: boolean;
+  // True when even after retrying, no authoritative (government-tier) source
+  // was found and corroboration is thin -- callers use this to tell the
+  // model to state the limitation plainly and offer a general-knowledge
+  // answer instead, rather than silently presenting weak evidence as if it
+  // were sufficient.
+  stillWeak: boolean;
+}
+
+// "Sufficient" for a research-grade answer means either a real official
+// source turned up, or there's enough independent corroboration that the
+// absence of one isn't immediately suspicious.
+function hasSufficientEvidence(sources: SearchSource[] | undefined): boolean {
+  if (!sources || sources.length === 0) return false;
+  return sources.some((s) => sourceTier(s.url) === "government") || sources.length >= 3;
+}
+
+// Strips parentheticals and quoted asides that can over-narrow a query
+// (e.g. "H.R. 1 (One Big Beautiful Bill Act)" -> "H.R. 1"), then biases the
+// retry toward primary/official sources instead of just repeating the same
+// search verbatim.
+function broadenQuery(query: string): string {
+  const stripped = query
+    .replace(/\([^)]*\)/g, "")
+    .replace(/"[^"]*"/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const base = stripped.length > 0 ? stripped : query;
+  return `${base} official source`;
+}
+
+// The automatic retrieval-quality gate requested for research questions
+// (legislation, court cases, official data, policy comparisons, government
+// information): run an initial search, evaluate whether what came back is
+// actually sufficient, and if not, automatically broaden the query and
+// retry ONCE before handing anything to the model -- never require the user
+// to notice weak results and manually ask for a re-search themselves.
+export async function runSearchWithRetry(
+  query: string,
+  maxResults = 5,
+  options?: { preferRecent?: boolean; onProgress?: (update: SearchProgressUpdate) => void },
+): Promise<SearchWithRetryOutcome> {
+  const first = await runSearchForMessage(query, maxResults, options);
+
+  if (hasSufficientEvidence(first.sources)) {
+    return { ...first, retried: false, stillWeak: false };
+  }
+
+  console.log(
+    `[orchestrate] initial retrieval insufficient for "${query.slice(0, 120)}" ` +
+      `(${first.sources?.length ?? 0} source(s), no authoritative hit) -- broadening query and retrying`,
+  );
+  options?.onProgress?.({ label: "Initial results were limited -- broadening the search..." });
+
+  const broadenedQuery = broadenQuery(query);
+  const retry =
+    broadenedQuery.toLowerCase() === query.toLowerCase()
+      ? first // nothing to strip -- retrying with an identical query would just repeat the same call
+      : await runSearchForMessage(broadenedQuery, Math.max(maxResults, 8), options);
+
+  const seen = new Set<string>();
+  const mergedSources: SearchSource[] = [];
+  for (const s of [...(retry.sources ?? []), ...(first.sources ?? [])]) {
+    if (!seen.has(s.url)) {
+      mergedSources.push(s);
+      seen.add(s.url);
+    }
+  }
+
+  const stillWeak = !hasSufficientEvidence(mergedSources);
+  console.log(
+    `[orchestrate] after retry: ${mergedSources.length} source(s) total, stillWeak=${stillWeak}`,
+  );
+
+  const liveDataParts = [first.liveData, retry !== first ? retry.liveData : undefined].filter(
+    (d): d is string => Boolean(d),
+  );
+
+  return {
+    success: retry.success || first.success,
+    liveData: liveDataParts.length > 0 ? liveDataParts.join("\n\n---\n\n") : undefined,
+    sources: mergedSources.length > 0 ? mergedSources : undefined,
+    note: [first.note, retry !== first ? retry.note : undefined].filter(Boolean).join(" ") || undefined,
+    retried: retry !== first,
+    stillWeak,
   };
 }

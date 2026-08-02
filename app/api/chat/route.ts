@@ -48,7 +48,7 @@ import { buildComparisonPacket } from "@/lib/research/comparison-packet";
 import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
 import { buildResearchPacket, type TieredSource } from "@/lib/research/packet";
-import { runSearchForMessage, type SearchSource } from "@/lib/search/orchestrate";
+import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
 
 const POLITICAL_CATEGORY_LABELS: Record<PoliticalIntent, string> = {
   political: "Researching",
@@ -85,14 +85,18 @@ function pickPrimaryIntent(intents: Set<PoliticalIntent>): PoliticalIntent {
   return "political";
 }
 
-// The search phase (provider query + page fetches) must never be allowed to
-// hang the response -- previously there was no ceiling at all beyond each
-// individual fetch's own timeout, and those ran sequentially, so a slow
-// provider or a handful of slow pages could stall the entire reply for a
-// minute or more with the user seeing nothing but bouncing dots. 18s leaves
-// headroom under the requested 20-30s total budget for the model's own
-// generation to still start in time.
-const SEARCH_TIMEOUT_MS = 18_000;
+// The search phase (provider query + page fetches, now potentially run
+// twice via runSearchWithRetry's automatic broaden-and-retry) must never be
+// allowed to hang the response -- previously there was no ceiling at all
+// beyond each individual fetch's own timeout, and those ran sequentially, so
+// a slow provider or a handful of slow pages could stall the entire reply
+// for a minute or more with the user seeing nothing but bouncing dots. 26s
+// gives room for two sequential 11s search phases (see orchestrate.ts's
+// SEARCH_PHASE_TIMEOUT_MS) plus provider-call overhead, so a retry actually
+// gets to finish instead of being cut off mid-flight, while still leaving
+// the model's own generation (FIRST_TOKEN_TIMEOUT_MS below) as a separate,
+// later budget.
+const SEARCH_TIMEOUT_MS = 26_000;
 // From "start generating" to the first streamed token -- covers the case
 // where the model call itself hangs (slow/stuck provider) even after the
 // search phase's own timeout has already been accounted for. Once a single
@@ -472,10 +476,10 @@ async function routeMessage(
     // we use it directly here instead of calling resolveFollowupTopic again.
     console.log(`[web-search] raw query sent to search provider: "${text}"`);
 
-    let searchResult: Awaited<ReturnType<typeof runSearchForMessage>>;
+    let searchResult: Awaited<ReturnType<typeof runSearchWithRetry>>;
     try {
       searchResult = await withTimeout(
-        runSearchForMessage(text, needsLiveInfo ? 10 : 6, {
+        runSearchWithRetry(text, needsLiveInfo ? 10 : 6, {
           preferRecent: detectRecencyNeed(text),
           onProgress: (update) => onStage(update.label),
         }),
@@ -490,6 +494,8 @@ async function routeMessage(
       console.error(`[web-search] search phase failed/timed out for "${text.slice(0, 120)}":`, err);
       searchResult = {
         success: false,
+        retried: false,
+        stillWeak: true,
         note: "Live web search is temporarily unavailable right now (it took too long to respond).",
       };
     }
@@ -497,17 +503,35 @@ async function routeMessage(
     if (searchResult.success && searchResult.liveData) {
       liveDataParts.push(searchResult.liveData);
       sources = searchResult.sources;
+      if (searchResult.stillWeak) {
+        // Retrieval WAS retried with a broadened query (see runSearchWithRetry)
+        // but still turned up no authoritative source and thin corroboration
+        // -- the model gets whatever was found, but must be explicit about the
+        // limitation and offer the user a choice instead of quietly presenting
+        // weak evidence as if it were sufficient.
+        liveDataParts.push(
+          "Retrieval note: an initial search was performed, evaluated as insufficient (no authoritative " +
+            "government or high-authority source, and thin corroboration), and automatically retried with a " +
+            "broadened query -- this already happened, do not tell the user you're about to search again. The " +
+            "results above are the best available after that retry, but still fall short of a strong evidentiary " +
+            "basis. State plainly what you found and that it isn't strongly corroborated, then ask the user " +
+            "whether they'd like your best general-knowledge answer instead (clearly labeled as unverified) -- " +
+            "don't just present the weak results as if they were sufficient.",
+        );
+      }
     } else {
       // Never let the model fall back to "I don't have web browsing" when
       // Web Search actually ran -- state plainly that the search itself
       // came up empty/failed instead, which is the true situation.
       liveDataParts.push(
         (searchResult.note ?? "Web search ran but returned no usable results.") +
+          (searchResult.retried ? " This was already retried once with a broadened query." : "") +
           " A web search WAS attempted for this message -- do not claim you lack web browsing capability, and " +
-          "do not say something like \"I will run a search\" or \"let me check\" since that search has already " +
-          "happened and is done. Tell the user plainly, in past tense, that live search is temporarily " +
-          "unavailable or didn't return relevant results for this specific query, then answer from your " +
-          "existing knowledge, clearly labeled as such rather than presented as freshly verified.",
+          "do not say something like \"I will run a search\" or \"let me check\" since that search (and its " +
+          "retry, if one happened) has already happened and is done. Tell the user plainly, in past tense, that " +
+          "live search didn't return usable results for this specific query even after retrying, then ask " +
+          "whether they'd like your best general-knowledge answer instead, clearly labeled as unverified rather " +
+          "than presented as freshly confirmed.",
       );
     }
   } else if (webSearchEnabled) {
