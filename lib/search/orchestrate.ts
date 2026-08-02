@@ -76,17 +76,23 @@ export async function runSearchForMessage(
   if (fetched.length > 0) {
     const lines = [
       `Live web search results (via ${usedProvider.label}, real page content fetched just now for this message). ` +
-        "Use ONLY the content below -- do not invent additional sources, URLs, or facts. Summarize/answer from " +
-        "this content and cite sources by URL. " +
-        "Do not just summarize the single top-ranked result -- read across ALL of the documents below and " +
-        "identify every genuinely major, distinct development they collectively report, not only the first " +
-        "article's angle. For a current-events or political question specifically, actively look for: " +
-        "leadership changes, candidate announcements, election filings, endorsements, resignations, " +
-        "appointments, major legislation, and court rulings. If multiple significant, distinct developments " +
-        "appear across the sources, present each one briefly (roughly 1-2 sentences apiece) rather than giving " +
-        "exhaustive depth on only the single biggest story -- prioritize covering every major development over " +
-        "dwelling on one. After that brief rundown, ask the user if they'd like more detail on any specific " +
-        "item, then list sources -- don't front-load a wall of detail nobody asked for yet.",
+        "Use ONLY the content below -- do not invent additional sources, URLs, or facts, and cite sources by URL. " +
+        "First: answer the user's EXACT question, directly, using whichever source(s) below actually address it -- " +
+        "then stop, unless something else below is genuinely necessary to answer what was asked. A search for a " +
+        "narrow factual question (\"who is the current president,\" \"when is the filing deadline\") will often " +
+        "also retrieve unrelated content that merely mentions the same person or topic (breaking news, an " +
+        "unrelated event, an old article) -- do NOT narrate that unrelated content just because it appeared in " +
+        "the results below; a fact retrieved alongside the answer is not automatically part of the answer. If the " +
+        "unrelated material seems like something the user might want, offer it as a one-line optional next step " +
+        "instead of including it (\"I can also cover recent developments if you'd like\") -- never volunteer it " +
+        "as part of the direct answer.\n\n" +
+        "The exception: if the user's actual question IS broad or about current events in general (\"what's " +
+        "happening with X,\" \"latest on Y\"), then read across ALL of the documents below and identify every " +
+        "genuinely major, distinct development they collectively report -- leadership changes, candidate " +
+        "announcements, election filings, endorsements, resignations, appointments, major legislation, court " +
+        "rulings -- presenting each briefly (1-2 sentences) rather than only the single biggest story, then ask " +
+        "if the user wants more detail on any specific item. Only do this when the question itself is genuinely " +
+        "broad -- not for every search result set by default.",
     ];
     fetched.forEach((item, index) => {
       lines.push(`\n${index + 1}. ${item.title}\nURL: ${item.url}\n${item.text}`);

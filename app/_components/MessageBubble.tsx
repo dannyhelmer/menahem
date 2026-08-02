@@ -11,10 +11,18 @@ const CONFIDENCE_LABEL: Record<NonNullable<UiMessage["confidence"]>, string> = {
   low: "Evidence Strength: Low",
 };
 
-// Clickable, not just a static label -- "why is this Medium?" gets a real,
-// mechanical answer (source counts/composition) instead of leaving the
-// reader to guess.
-function ConfidenceDisclosure({
+const CONFIDENCE_DOT_CLASS: Record<NonNullable<UiMessage["confidence"]>, string> = {
+  high: "bg-green-500",
+  medium: "bg-amber-500",
+  low: "bg-neutral-400",
+};
+
+// Its own step in the reading flow (Answer -> Evidence Strength -> Sources
+// -> Related Questions), not a footnote squeezed into the Sources header --
+// "why is this Medium?" still gets a real, mechanical answer (source
+// counts/composition) on click, it just isn't fighting the Sources label
+// for the same row anymore.
+function EvidenceStrength({
   confidence,
   reason,
 }: {
@@ -23,21 +31,27 @@ function ConfidenceDisclosure({
 }) {
   const [open, setOpen] = useState(false);
 
-  if (!reason) {
-    return <span className="text-xs text-neutral-400 dark:text-neutral-500">{CONFIDENCE_LABEL[confidence]}</span>;
-  }
-
   return (
-    <div className="text-right">
-      <button
-        onClick={() => setOpen((prev) => !prev)}
-        aria-expanded={open}
-        className="hover:text-burgundy text-xs text-neutral-400 underline decoration-dotted underline-offset-2 dark:text-neutral-500"
-      >
-        {CONFIDENCE_LABEL[confidence]}
-      </button>
-      {open && (
-        <p className="mt-1 max-w-[240px] text-left text-xs whitespace-pre-line text-neutral-500 dark:text-neutral-400">
+    <div className="mt-3 border-t border-neutral-100 pt-3 dark:border-neutral-800">
+      {reason ? (
+        <button
+          onClick={() => setOpen((prev) => !prev)}
+          aria-expanded={open}
+          className="flex items-center gap-1.5 text-xs font-medium text-neutral-500 dark:text-neutral-400"
+        >
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${CONFIDENCE_DOT_CLASS[confidence]}`} aria-hidden="true" />
+          <span className="hover:text-burgundy underline decoration-dotted underline-offset-2">
+            {CONFIDENCE_LABEL[confidence]}
+          </span>
+        </button>
+      ) : (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-neutral-500 dark:text-neutral-400">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${CONFIDENCE_DOT_CLASS[confidence]}`} aria-hidden="true" />
+          {CONFIDENCE_LABEL[confidence]}
+        </span>
+      )}
+      {open && reason && (
+        <p className="mt-1.5 max-w-[320px] text-xs whitespace-pre-line text-neutral-500 dark:text-neutral-400">
           {reason}
         </p>
       )}
@@ -47,21 +61,16 @@ function ConfidenceDisclosure({
 
 function SourcesList({
   sources,
-  confidence,
-  confidenceReason,
+  needsOwnSeparator,
 }: {
   sources: { title: string; url: string }[];
-  confidence?: UiMessage["confidence"];
-  confidenceReason?: string;
+  needsOwnSeparator: boolean;
 }) {
   return (
-    <div className="mt-3 border-t border-neutral-100 pt-3 dark:border-neutral-800">
-      <div className="mb-1.5 flex items-center justify-between">
-        <p className="text-xs font-medium tracking-wide text-neutral-400 uppercase dark:text-neutral-500">
-          Sources
-        </p>
-        {confidence && <ConfidenceDisclosure confidence={confidence} reason={confidenceReason} />}
-      </div>
+    <div className={needsOwnSeparator ? "mt-3 border-t border-neutral-100 pt-3 dark:border-neutral-800" : "mt-3"}>
+      <p className="mb-1.5 text-xs font-medium tracking-wide text-neutral-400 uppercase dark:text-neutral-500">
+        Sources
+      </p>
       <ul className="space-y-1">
         {sources.map((source) => (
           <li key={source.url}>
@@ -215,12 +224,11 @@ export default function MessageBubble({
   return (
     <div className="max-w-[85%] min-w-0 text-[15px] break-words text-neutral-800 dark:text-neutral-100">
       <Markdown content={message.content} />
+      {message.confidence && (
+        <EvidenceStrength confidence={message.confidence} reason={message.confidenceReason} />
+      )}
       {message.sources && message.sources.length > 0 && (
-        <SourcesList
-          sources={message.sources}
-          confidence={message.confidence}
-          confidenceReason={message.confidenceReason}
-        />
+        <SourcesList sources={message.sources} needsOwnSeparator={!message.confidence} />
       )}
       {message.followups && message.followups.length > 0 && (
         <FollowupChips suggestions={message.followups} onSelect={onSelectFollowup} />

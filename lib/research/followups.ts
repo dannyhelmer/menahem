@@ -15,7 +15,10 @@ export function buildFollowupSuggestions(intents: Set<PoliticalIntent>): string[
   if (intents.has("elections")) {
     return ["What's the filing deadline?", "Recent polling", "Who else is running?"];
   }
-  if (intents.has("congress") || intents.has("governor") || intents.has("executive_branch")) {
+  if (intents.has("executive_branch")) {
+    return ["The administration", "Executive orders", "Political party", "Recent news"];
+  }
+  if (intents.has("congress") || intents.has("governor")) {
     return ["Voting record", "Campaign finance", "Recent news"];
   }
   return ["Recent developments", "Opposing viewpoints", "Primary sources"];

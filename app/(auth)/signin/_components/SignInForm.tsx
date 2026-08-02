@@ -37,7 +37,9 @@ export default function SignInForm() {
     <div className="w-full max-w-sm space-y-6">
       <div className="text-center">
         <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-50">Sign in to Menahem</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Government Intelligence Platform</p>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          AI-powered research for legislation, public policy, and official government sources.
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">

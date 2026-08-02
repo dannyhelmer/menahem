@@ -210,8 +210,11 @@ export async function buildResearchPacket(
   const instructions = [
     "Cite every source you use by its URL. Never invent a source, figure, or detail not present below.",
     "When multiple sources corroborate the same fact, prefer citing the most authoritative one available, in " +
-      "this order: Congress.gov, House.gov/Senate.gov, CBO.gov, CRS Reports, the Federal Register, Supreme " +
-      "Court opinions, official state government sites, then other reputable secondary sources.",
+      "this order: official .gov sites (Congress.gov, WhiteHouse.gov, House.gov/Senate.gov, CBO.gov, CRS " +
+      "Reports), the Federal Register, Supreme Court opinions, official state government sites, then Reuters/AP, " +
+      "then other major news organizations, then other news sources, then Wikipedia only as background/" +
+      "supporting context -- never let a lower-authority news site outrank an official source that says the " +
+      "same thing.",
   ];
   if (LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent))) {
     instructions.push(LEGISLATIVE_SUMMARY_INSTRUCTIONS);

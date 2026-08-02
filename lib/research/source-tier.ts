@@ -76,6 +76,7 @@ export function sourceTierScore(url: string): number {
 // congress.gov suffix, etc.).
 const AUTHORITY_RULES: [(host: string) => boolean, number][] = [
   [(h) => h === "congress.gov", 100],
+  [(h) => h === "whitehouse.gov", 100],
   [(h) => h === "crsreports.congress.gov", 85],
   [(h) => h.endsWith(".house.gov") || h === "house.gov", 95],
   [(h) => h.endsWith(".senate.gov") || h === "senate.gov", 95],
