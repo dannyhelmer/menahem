@@ -47,7 +47,8 @@ import { generateTitle } from "@/lib/memory/title";
 import { buildComparisonPacket } from "@/lib/research/comparison-packet";
 import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
-import { buildResearchPacket, type TieredSource } from "@/lib/research/packet";
+import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
+import { filterUsedSources } from "@/lib/research/source-attribution";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
 
 const POLITICAL_CATEGORY_LABELS: Record<PoliticalIntent, string> = {
@@ -741,10 +742,20 @@ export const POST = withAuth(async (request, _ctx, user) => {
         );
 
         // The actual "citation referencing the uploaded document" (Phase 15) --
-        // merged in regardless of which branch handled the message.
+        // merged in regardless of which branch handled the message. Tagged
+        // "always_keep" like a gov-data-provider source: a document Q&A
+        // session is inherently about that document, so it's never subject
+        // to the post-generation reference-match filter below.
         const documentSource = documentId ? await getDocument(documentId, user.id) : null;
         const allSources = documentSource
-          ? [...(sources ?? []), { title: documentSource.filename, url: `/api/documents/${documentSource.id}/file` }]
+          ? [
+              ...(sources ?? []),
+              {
+                title: documentSource.filename,
+                url: `/api/documents/${documentSource.id}/file`,
+                provenance: "always_keep" as const,
+              },
+            ]
           : sources;
 
         // Skip for web_search -- the real-time progress checklist emitted
@@ -752,9 +763,11 @@ export const POST = withAuth(async (request, _ctx, user) => {
         // writing it again here would just append a redundant "Searching
         // the web" line after "Generating response..." already appeared.
         if (category !== "web_search") writeFrame({ type: "status", category, label });
-        if (allSources && allSources.length > 0) writeFrame({ type: "sources", sources: allSources });
-        if (confidence) writeFrame({ type: "confidence", level: confidence, reason: confidenceReason });
         if (followups && followups.length > 0) writeFrame({ type: "followups", suggestions: followups });
+        // Sources and confidence are NOT sent yet -- the retrieval set is not
+        // the same thing as "sources that actually support this response".
+        // Both are recomputed from the generated text and sent once
+        // generation finishes (see the source-attribution filtering below).
 
         // ---- Subscription limit check: Deep Research ----
         if (deepResearchEnabled) {
@@ -858,12 +871,40 @@ export const POST = withAuth(async (request, _ctx, user) => {
         }
         assistantText = validatedText;
 
+        // SOURCE ATTRIBUTION: Sources, Evidence Strength, and inline
+        // citations must all reference the same, generation-validated set --
+        // never the raw retrieval set, which routinely includes tangentially
+        // related pages the model never actually drew on. A source is kept
+        // only if it's "always_keep" (a gov-data-provider record or the
+        // uploaded document -- known to have informed the response
+        // regardless of whether it's named in prose) or if the final text
+        // actually references it (by URL, hostname, or title).
+        const usedSources = filterUsedSources(assistantText, allSources ?? []);
+
+        // Confidence was computed against the full retrieval set before
+        // generation; recompute it against what was actually used so the
+        // Evidence Strength panel can never claim stronger backing than the
+        // Sources list it's displayed alongside. Only applies to the
+        // packet-based paths (political/deep-research/comparison) that set
+        // `confidence` in the first place -- plain web search never did.
+        let finalConfidence = confidence;
+        let finalConfidenceReason = confidenceReason;
+        if (confidence) {
+          const usedTiered = usedSources as TieredSource[];
+          const directGovHit = usedTiered.some((s) => s.provenance === "always_keep" && s.tier === "government");
+          finalConfidence = computeConfidence(usedTiered, directGovHit);
+          finalConfidenceReason = buildConfidenceReason(finalConfidence, usedTiered, directGovHit);
+        }
+
+        if (usedSources.length > 0) writeFrame({ type: "sources", sources: usedSources });
+        if (finalConfidence) writeFrame({ type: "confidence", level: finalConfidence, reason: finalConfidenceReason });
+
         await appendMessage(sessionId, user.id, {
           role: "assistant",
           content: assistantText,
-          sources: allSources,
-          confidence,
-          confidenceReason,
+          sources: usedSources,
+          confidence: finalConfidence,
+          confidenceReason: finalConfidenceReason,
           truncated,
         });
         await touchEndTime(sessionId, user.id);

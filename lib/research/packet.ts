@@ -229,6 +229,11 @@ export interface TieredSource {
   title: string;
   url: string;
   tier: SourceTier;
+  // See lib/research/source-attribution.ts -- "always_keep" sources are
+  // ones already known to have informed the response (a gov-data-provider
+  // record used to build the header) regardless of whether the model names
+  // them in prose; ordinary web-search sources are only kept if referenced.
+  provenance?: "always_keep" | "web_search";
 }
 
 export interface ResearchPacket {
@@ -246,6 +251,16 @@ export interface ResearchPacket {
 // itself (that would require judgment this function doesn't have grounds
 // to make). Shared by the plain packet, Deep Research, and Comparison so
 // "why is this Medium?" always has a real, honest answer behind it.
+// Extracted so the same rule can be re-applied post-generation against a
+// filtered (actually-used) source set, not just the raw retrieval set --
+// see filterUsedSources in source-attribution.ts.
+export function computeConfidence(sources: TieredSource[], directGovHit: boolean): ResearchPacket["confidence"] {
+  const governmentSourceCount = sources.filter((s) => s.tier === "government").length;
+  if (directGovHit || (governmentSourceCount >= 1 && sources.length >= 2)) return "high";
+  if (sources.length >= 1) return "medium";
+  return "low";
+}
+
 export function buildConfidenceReason(
   confidence: ResearchPacket["confidence"],
   sources: TieredSource[],
@@ -308,7 +323,7 @@ export async function buildResearchPacket(
     if (result.success && result.liveData) {
       liveDataParts.push(result.liveData);
       directGovHit = true;
-      for (const s of result.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url) });
+      for (const s of result.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url), provenance: "always_keep" });
 
       const relatedNote = await buildRelatedEntitiesNote(result.graph?.representativeId, result.graph?.entityId);
       if (relatedNote) liveDataParts.push(relatedNote);
@@ -325,7 +340,7 @@ export async function buildResearchPacket(
   });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
-    for (const s of searchResult.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url) });
+    for (const s of searchResult.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url), provenance: "web_search" });
     // Only flag this to the model when nothing else in the packet already
     // confirms the answer -- a direct government-data-provider hit means
     // overall confidence is fine even if this supplementary web search
@@ -344,14 +359,13 @@ export async function buildResearchPacket(
     liveDataParts.push(searchResult.note + (searchResult.retried ? " (already retried once with a broadened query)" : ""));
   }
 
-  const governmentSourceCount = sources.filter((s) => s.tier === "government").length;
-  let confidence: ResearchPacket["confidence"];
-  if (directGovHit || (governmentSourceCount >= 1 && sources.length >= 2)) confidence = "high";
-  else if (sources.length >= 1) confidence = "medium";
-  else confidence = "low";
+  const confidence = computeConfidence(sources, directGovHit);
 
   const instructions = [
-    "Cite every source you use by its URL. Never invent a source, figure, or detail not present below.",
+    "Cite every source you use by its URL. Never invent a source, figure, or detail not present below. Only " +
+      "name/cite a source you actually drew on -- if you don't name it (its title, publication, or domain) " +
+      "somewhere near the claim it supports, it will not be shown to the user as a source for this response, so " +
+      "silently relying on a source without naming it defeats the purpose of citing at all.",
     "When multiple sources corroborate the same fact, prefer citing the most authoritative one available, in " +
       "this order: the bill text itself, Congress.gov, committee reports, the Congressional Record, the Federal " +
       "Register, WhiteHouse.gov, Supreme Court opinions, other government agencies (any .gov site, including " +
