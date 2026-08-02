@@ -50,6 +50,18 @@ async function callCongress(path: string, apiKey: string): Promise<unknown> {
   return response.json();
 }
 
+// Congress.gov action text is natural-language and already contains vote
+// tallies when a chamber vote happened, e.g. "On passage Passed by the Yeas
+// and Nays: 220 - 213 (Roll no. 123)." or "Passed Senate without amendment
+// by Yea-Nay Vote. 68 - 29." -- extracted here instead of re-deriving vote
+// counts from a separate endpoint, since the action feed already states them
+// verbatim.
+const VOTE_TALLY_RE = /(\d+)\s*[-–]\s*(\d+)/;
+
+function isChamberPassageAction(text: string): boolean {
+  return /\bpassed\b|\bon passage\b|\bagreed to\b/i.test(text) && !/\breferred\b|\breport\b/i.test(text);
+}
+
 async function retrieveBill(query: string, apiKey: string): Promise<GovRetrievalResult> {
   const parsed = parseBillIdentifier(query);
   if (!parsed) return { success: false };
@@ -63,9 +75,11 @@ async function retrieveBill(query: string, apiKey: string): Promise<GovRetrieval
       bill?: {
         title?: string;
         sponsors?: { fullName?: string; party?: string; state?: string; bioguideId?: string }[];
+        cosponsors?: { count?: number };
         latestAction?: { actionDate?: string; text?: string };
         introducedDate?: string;
         policyArea?: { name?: string };
+        laws?: { type?: string; number?: string }[];
       };
     };
     const bill = detail.bill;
@@ -74,16 +88,42 @@ async function retrieveBill(query: string, apiKey: string): Promise<GovRetrieval
     }
 
     const lines = [
-      `Congress.gov record for ${displayNumber} (${congress}th Congress). Use ONLY this content -- do not invent sponsors, actions, or status not shown here.`,
-      `Title: ${bill.title ?? "(untitled)"}`,
+      `Congress.gov record for ${displayNumber} (${congress}th Congress). Use ONLY this content -- do not invent sponsors, committees, actions, votes, or status not shown here. If a field below is absent, it was not found in this record -- say so explicitly rather than guessing.`,
+      `Official Title: ${bill.title ?? "(untitled)"}`,
+      `Bill Number: ${displayNumber}`,
+      `Congress: ${congress}th Congress`,
     ];
     const sponsor = bill.sponsors?.[0];
     if (sponsor) {
-      lines.push(`Sponsor: ${sponsor.fullName ?? "unknown"} (${sponsor.party ?? "?"}-${sponsor.state ?? "?"})`);
+      const cosponsorCount = bill.cosponsors?.count;
+      lines.push(
+        `Sponsor: ${sponsor.fullName ?? "unknown"} (${sponsor.party ?? "?"}-${sponsor.state ?? "?"})` +
+          (typeof cosponsorCount === "number" ? `. Cosponsors: ${cosponsorCount}.` : ""),
+      );
     }
-    if (bill.introducedDate) lines.push(`Introduced: ${bill.introducedDate}`);
-    if (bill.policyArea?.name) lines.push(`Policy area: ${bill.policyArea.name}`);
-    if (bill.latestAction) lines.push(`Latest action (${bill.latestAction.actionDate ?? "?"}): ${bill.latestAction.text ?? ""}`);
+    if (bill.introducedDate) lines.push(`Date Introduced: ${bill.introducedDate}`);
+    if (bill.policyArea?.name) lines.push(`Policy Area: ${bill.policyArea.name}`);
+    if (bill.latestAction) lines.push(`Current Status (latest action, ${bill.latestAction.actionDate ?? "?"}): ${bill.latestAction.text ?? ""}`);
+
+    const law = bill.laws?.[0];
+    if (law) lines.push(`Became law: ${law.type ?? "Public Law"} No. ${law.number ?? "(number not shown)"}.`);
+
+    // Committees of referral -- a dedicated endpoint rather than parsing
+    // "Referred to the Committee on..." out of the actions feed, since it
+    // gives structured committee names directly.
+    try {
+      const committeesData = (await callCongress(`/bill/${congress}/${billType}/${billNumber}/committees`, apiKey)) as {
+        committees?: { name?: string; chamber?: string }[];
+      };
+      const committees = committeesData.committees ?? [];
+      if (committees.length > 0) {
+        lines.push(
+          `Committee(s) of Referral: ${committees.map((c) => `${c.name ?? "unknown committee"}${c.chamber ? ` (${c.chamber})` : ""}`).join("; ")}`,
+        );
+      }
+    } catch {
+      // Committee data is best-effort -- its absence doesn't invalidate the rest of the record.
+    }
 
     const url = `https://www.congress.gov/bill/${congress}th-congress/${billType === "hr" ? "house-bill" : billType === "s" ? "senate-bill" : billType}/${billNumber}`;
 
@@ -114,19 +154,55 @@ async function retrieveBill(query: string, apiKey: string): Promise<GovRetrieval
       }
     });
 
-    await safeUpsertGraph(async () => {
+    // Actions feed drives both the graph timeline (existing behavior) and,
+    // new here, the major-action/chamber-vote/signature lines surfaced
+    // directly into liveData -- fetched once and reused for both rather than
+    // making two separate calls for the same data.
+    try {
       const actionsData = (await callCongress(`/bill/${congress}/${billType}/${billNumber}/actions`, apiKey)) as {
         actions?: { actionDate?: string; text?: string }[];
       };
-      const events: TimelineEvent[] = (actionsData.actions ?? [])
-        .filter((a) => a.actionDate && a.text)
-        .map((a) => {
+      const actions = (actionsData.actions ?? []).filter((a) => a.actionDate && a.text);
+      const chronological = [...actions].reverse(); // Congress.gov returns newest-first
+
+      await safeUpsertGraph(async () => {
+        const events: TimelineEvent[] = chronological.map((a) => {
           const stage = classifyBillStage(a.text!);
           return { date: a.actionDate!, label: stageLabel(stage), description: a.text!, stage };
-        })
-        .reverse(); // Congress.gov returns newest-first; timelines read chronologically
-      if (events.length > 0) await upsertTimeline(billEntityId, events);
-    });
+        });
+        if (events.length > 0) await upsertTimeline(billEntityId, events);
+      });
+
+      // Chamber vote totals -- lines whose text reads as a passage/agreement
+      // action AND actually contains a numeric tally, so procedural motions
+      // and voice votes (no numbers) are left out rather than misreported.
+      const voteLines = chronological
+        .filter((a) => isChamberPassageAction(a.text!) && VOTE_TALLY_RE.test(a.text!))
+        .map((a) => `${a.actionDate}: ${a.text}`);
+      if (voteLines.length > 0) {
+        lines.push(`Chamber Vote Totals (as recorded in the actions feed):\n${voteLines.map((l) => `- ${l}`).join("\n")}`);
+      }
+
+      // Presidential signature -- the actions feed records this as a
+      // dedicated action rather than a separate field on the bill object.
+      const signAction = chronological.find((a) => /\bsigned by (the )?president\b/i.test(a.text!));
+      if (signAction) lines.push(`Presidential Signature Date: ${signAction.actionDate}`);
+
+      // A trimmed chronological list of the major actions (committee
+      // referral, reporting, passage, signature) so the model has real
+      // ordered milestones instead of only the single latest-action line.
+      const majorStages = new Set(["introduced", "committee", "passed_chamber", "resolving_differences", "to_president", "signed", "vetoed"]);
+      const majorActions = chronological.filter((a) => majorStages.has(classifyBillStage(a.text!)));
+      if (majorActions.length > 0) {
+        lines.push(
+          `Major Committee Actions and Milestones (chronological):\n${majorActions
+            .map((a) => `- ${a.actionDate}: ${a.text}`)
+            .join("\n")}`,
+        );
+      }
+    } catch {
+      // Actions feed is best-effort -- its absence doesn't invalidate the rest of the record.
+    }
 
     return {
       success: true,

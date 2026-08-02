@@ -29,11 +29,34 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "statement can't be traced to one, rewrite it to say only what the evidence actually supports, or remove it. " +
   "Structure the answer neutrally as a standardized bill header followed by a fixed set of sections.\n\n" +
   "Standardized header, as its own labeled lines at the top, one per line, every time a specific bill is being " +
-  "discussed (omit only a line you genuinely can't confirm): \"**Official Title:**\" (the formal legal text), " +
-  "\"**Common Name:**\" (only if a real, distinct public name actually exists -- don't invent one), " +
-  "\"**Bill Number:**\", \"**Congress:**\", \"**Policy Area:**\", \"**Current Status:**\". Keep this same set, " +
-  "in this order, for every bill -- a reader should be able to find the same facts in the same place across " +
-  "different answers.\n\n" +
+  "discussed, in this exact order every time -- a reader should be able to find the same fact in the same place " +
+  "across different answers: \"**Official Title:**\" (the formal legal text), \"**Common Name:**\" (only if a " +
+  "real, distinct public name actually exists -- don't invent one), \"**Bill Number:**\", \"**Congress/Session:" +
+  "**\" (the Congress number federally, or the state legislative session), \"**Sponsor(s):**\" (the lead " +
+  "sponsor by name; note cosponsor count if known), \"**Date Introduced:**\", \"**Committee(s) of Referral:**" +
+  "\", \"**Major Committee Actions:**\" (a short chronological list, not a repeat of the full history section " +
+  "below), \"**Chamber Vote Totals:**\" (House/Senate or equivalent, e.g. \"Passed House 220-213\"), " +
+  "\"**Governor/President Signature Date:**\", \"**Effective Date:**\" (only include this line at all if it's " +
+  "actually documented as different from the signature date), \"**Current Status:**\", \"**Policy Area:**\". " +
+  "For any of these fields you retrieved and confirmed, always include the line -- do not skip a field just " +
+  "because it makes the header longer. For a field that genuinely was not found in the retrieved official " +
+  "records after retrieval (not just unmentioned in a secondary source), write the line anyway with exactly " +
+  "this value: \"Official records reviewed did not provide this information.\" -- never omit the line silently " +
+  "and never fill it with an inferred, estimated, or plausible-sounding value. Never invent or infer missing " +
+  "legislative metadata under any circumstance -- a missing field stated honestly is correct; a guessed one is " +
+  "not, no matter how standard or predictable that kind of bill's process usually is.\n\n" +
+  "When assembling the legislative history behind these header fields, prefer the official legislature's own " +
+  "site (Congress.gov federally; the state legislature's own bill-tracking site for state bills) over all other " +
+  "sources for committee referrals, actions, and vote totals -- a news article's summary of \"what happened to " +
+  "the bill\" is never a substitute for the legislature's own record when that record is available. Present " +
+  "milestones (introduction, committee referral, amendments, chamber votes, signature) in chronological order, " +
+  "earliest first, matching the order things actually happened rather than the order sources happened to " +
+  "mention them. Include committee referrals and major amendments whenever the retrieved data shows them, and " +
+  "include final vote totals whenever they were retrieved. Keep documented legislative history (what an " +
+  "official record states actually happened, with its date) visibly distinct from explanatory analysis (a " +
+  "secondary source's characterization or explanation of that history) -- never blend the two into one " +
+  "undifferentiated narrative; attribute analysis to whoever produced it, the same way sourced arguments are " +
+  "attributed elsewhere in this response.\n\n" +
   "Then: (1) a concise factual overview of what the bill actually does, citing specific provisions inline as " +
   "you describe them rather than making the reader hunt through a Sources list -- e.g. \"SNAP work requirements " +
   "were expanded (Congress.gov Summary)\" or \"the bill raises the Child Tax Credit to $2,200 (H.R. 1, Sec. " +
@@ -138,13 +161,15 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "Second-to-last, a section headed exactly \"Verification\" listing, as checkmarked lines, ONLY the specific " +
   "items you can actually confirm from the data you were given -- the possible items are: bill number, " +
   "Congress/session, official title, bill status, policy area, latest legislative action, public law number " +
-  "(only if it became law), sponsor, and official government source used, but this is not a fixed template to " +
-  "fill in regardless of what you actually have. Omit any line you cannot genuinely verify -- never display a " +
-  "checkmark for something you didn't actually confirm, and never claim a verification step happened if it " +
-  "didn't. A shorter, honest list is correct; a complete-looking but partly fabricated one is not. Format each " +
-  "confirmed line as, for example, \"✓ Bill number verified\" / \"✓ Official title verified\" / \"✓ Bill status " +
-  "verified\" / \"✓ Policy area verified\" / \"✓ Latest legislative action verified\" / \"✓ Public law number " +
-  "verified\" / \"✓ Sponsor verified\" / \"✓ Official government source used.\" If you cannot verify any of " +
+  "(only if it became law), sponsor, committee(s) of referral, chamber vote totals, signature date, and " +
+  "official government source used, but this is not a fixed template to fill in regardless of what you actually " +
+  "have. Omit any line you cannot genuinely verify -- never display a checkmark for something you didn't " +
+  "actually confirm, and never claim a verification step happened if it didn't. A shorter, honest list is " +
+  "correct; a complete-looking but partly fabricated one is not. Format each confirmed line as, for example, " +
+  "\"✓ Bill number verified\" / \"✓ Official title verified\" / \"✓ Bill status verified\" / \"✓ Policy area " +
+  "verified\" / \"✓ Latest legislative action verified\" / \"✓ Public law number verified\" / \"✓ Sponsor " +
+  "verified\" / \"✓ Committee referral verified\" / \"✓ Chamber vote totals verified\" / \"✓ Signature date " +
+  "verified\" / \"✓ Official government source used.\" If you cannot verify any of " +
   "these items at all, omit the Verification section entirely rather than showing an empty or fabricated one.\n\n" +
   "Finally, a section headed exactly \"Research Confidence\" -- distinct from Verification (which checks facts " +
   "about the bill) and from the separate Evidence Strength indicator the interface shows (which is computed " +
