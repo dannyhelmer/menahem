@@ -4,6 +4,42 @@ import type { SearchProvider, SearchResult } from "./types";
 import { sourceAuthorityRank } from "@/lib/research/source-tier";
 
 const MAX_PAGES_TO_FETCH = 8;
+// Per-source fetches run in parallel (see below), so this bounds total
+// search-phase wall-clock time regardless of how many candidates there are
+// -- previously fetches ran sequentially (up to 8 x 8s = ~64s worst case),
+// which alone could blow well past any reasonable response time before the
+// model was ever even invoked.
+const SEARCH_PHASE_TIMEOUT_MS = 15_000;
+
+const FRIENDLY_SOURCE_NAMES: Record<string, string> = {
+  "reuters.com": "Reuters",
+  "apnews.com": "Associated Press",
+  "congress.gov": "Congress.gov",
+  "whitehouse.gov": "White House",
+  "supremecourt.gov": "Supreme Court",
+  "federalregister.gov": "Federal Register",
+  "bbc.com": "BBC",
+  "bbc.co.uk": "BBC",
+  "npr.org": "NPR",
+  "usa.gov": "USA.gov",
+  "ballotpedia.org": "Ballotpedia",
+  "wikipedia.org": "Wikipedia",
+};
+
+// A short, human-friendly label for a source URL -- used for the live
+// "Searching..." progress checklist, not for citations (which keep the
+// real page title).
+export function friendlySourceName(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    if (FRIENDLY_SOURCE_NAMES[host]) return FRIENDLY_SOURCE_NAMES[host];
+    if (host.endsWith(".gov")) return host;
+    const primary = host.split(".").slice(-2, -1)[0] ?? host;
+    return primary.charAt(0).toUpperCase() + primary.slice(1);
+  } catch {
+    return url;
+  }
+}
 
 export interface SearchSource {
   title: string;
@@ -17,11 +53,16 @@ export interface SearchOutcome {
   note?: string;
 }
 
+export interface SearchProgressUpdate {
+  label: string;
+}
+
 export async function runSearchForMessage(
   query: string,
   maxResults = 5,
-  options?: { preferRecent?: boolean },
+  options?: { preferRecent?: boolean; onProgress?: (update: SearchProgressUpdate) => void },
 ): Promise<SearchOutcome> {
+  const onProgress = options?.onProgress ?? (() => {});
   console.log(`[orchestrate] raw search query: "${query}" (maxResults=${maxResults}, preferRecent=${Boolean(options?.preferRecent)})`);
   const providers = await getConfiguredProviders();
   if (providers.length === 0) {
@@ -37,9 +78,10 @@ export async function runSearchForMessage(
   let results: SearchResult[] = [];
   const failureNotes: string[] = [];
 
+  const providerOptions = { preferRecent: options?.preferRecent };
   for (const provider of providers) {
     try {
-      const providerResults = await provider.search(query, maxResults, options);
+      const providerResults = await provider.search(query, maxResults, providerOptions);
       if (providerResults.length > 0) {
         usedProvider = provider;
         results = providerResults;
@@ -47,12 +89,13 @@ export async function runSearchForMessage(
       }
       failureNotes.push(`${provider.label} returned no results`);
     } catch (err) {
+      console.error(`[orchestrate] provider "${provider.label}" threw:`, err);
       failureNotes.push(`${provider.label}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   if (!usedProvider) {
-    console.log(`[orchestrate] every provider failed/empty: ${failureNotes.join("; ")}`);
+    console.error(`[orchestrate] every provider failed/empty: ${failureNotes.join("; ")}`);
     return {
       success: false,
       note: `Web search failed across every configured provider (${providers.length} tried) -- ${failureNotes.join("; ")}.`,
@@ -77,7 +120,7 @@ export async function runSearchForMessage(
         }
       }
     } catch (err) {
-      console.log(`[orchestrate] fallback general search failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`[orchestrate] fallback general search failed:`, err);
     }
   }
 
@@ -87,19 +130,47 @@ export async function runSearchForMessage(
   // the list is sliced down to MAX_PAGES_TO_FETCH.
   const ranked = [...results].sort((a, b) => sourceAuthorityRank(b.url) - sourceAuthorityRank(a.url));
   const candidates = ranked.slice(0, MAX_PAGES_TO_FETCH);
-  const fetched: { title: string; url: string; text: string }[] = [];
-  for (const candidate of candidates) {
+
+  onProgress({ label: "Searching trusted government and news sources..." });
+
+  // Fetched in parallel, each with its own timeout inside fetchPageText, and
+  // the whole batch additionally bounded by SEARCH_PHASE_TIMEOUT_MS -- a
+  // single slow/hanging page can no longer stall every other fetch behind
+  // it (previously sequential), and can't stall the response past a hard
+  // ceiling even if something ignores its own timeout.
+  const fetchWithProgress = async (candidate: SearchResult) => {
     const { text, error } = await fetchPageText(candidate.url);
     if (text) {
-      fetched.push({ title: candidate.title, url: candidate.url, text });
-    } else {
-      console.log(`[orchestrate] couldn't extract page text for ${candidate.url}: ${error}`);
+      onProgress({ label: `✓ ${friendlySourceName(candidate.url)}` });
+      return { title: candidate.title, url: candidate.url, text };
     }
-  }
+    console.log(`[orchestrate] couldn't extract page text for ${candidate.url}: ${error}`);
+    return null;
+  };
+
+  const searchPhaseTimeout = new Promise<null>((resolve) =>
+    setTimeout(() => {
+      console.error(`[orchestrate] search phase exceeded ${SEARCH_PHASE_TIMEOUT_MS}ms -- proceeding with whatever fetched in time`);
+      resolve(null);
+    }, SEARCH_PHASE_TIMEOUT_MS),
+  );
+
+  const fetchResults = await Promise.race([
+    Promise.allSettled(candidates.map(fetchWithProgress)),
+    searchPhaseTimeout,
+  ]);
+
+  const fetched = (fetchResults ?? [])
+    .filter((r): r is PromiseFulfilledResult<{ title: string; url: string; text: string } | null> => r.status === "fulfilled")
+    .map((r) => r.value)
+    .filter((v): v is { title: string; url: string; text: string } => v !== null);
+
   console.log(
     `[orchestrate] extracted ${fetched.length}/${candidates.length} documents via ${usedProvider.label}: ` +
       JSON.stringify(fetched.map((f) => ({ title: f.title, url: f.url, chars: f.text.length }))),
   );
+
+  onProgress({ label: "Generating response..." });
 
   if (fetched.length > 0) {
     const lines = [
@@ -136,6 +207,14 @@ export async function runSearchForMessage(
       success: true,
       liveData: lines.join("\n"),
       sources: fetched.map((f) => ({ title: f.title, url: f.url })),
+    };
+  }
+
+  if (candidates.length === 0) {
+    console.error("[orchestrate] no candidates to fall back to after fetch phase");
+    return {
+      success: false,
+      note: `Web search via ${usedProvider.label} returned results, but none could be retrieved in time.`,
     };
   }
 

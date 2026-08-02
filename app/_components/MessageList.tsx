@@ -29,17 +29,26 @@ export default function MessageList({
         />
       ))}
       {isThinking && (
-        <div className="flex items-center gap-2 px-1 py-1">
-          <span className="flex items-center gap-1.5">
-            <span className="bg-burgundy/50 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
-            <span className="bg-burgundy/50 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
-            <span className="bg-burgundy/50 h-1.5 w-1.5 animate-bounce rounded-full" />
-          </span>
-          {lastMessage.statusLabel && (
-            <span className="text-sm text-neutral-400 dark:text-neutral-500">
-              {lastMessage.statusLabel}…
+        <div className="flex flex-col gap-1.5 px-1 py-1">
+          {(lastMessage.searchProgress ?? []).slice(0, -1).map((line, index) => (
+            <span key={index} className="text-sm text-neutral-400 dark:text-neutral-500">
+              {line}
             </span>
-          )}
+          ))}
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5">
+              <span className="bg-burgundy/50 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
+              <span className="bg-burgundy/50 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
+              <span className="bg-burgundy/50 h-1.5 w-1.5 animate-bounce rounded-full" />
+            </span>
+            <span className="text-sm text-neutral-400 dark:text-neutral-500">
+              {lastMessage.searchProgress?.length
+                ? lastMessage.searchProgress[lastMessage.searchProgress.length - 1]
+                : lastMessage.statusLabel
+                  ? `${lastMessage.statusLabel}…`
+                  : null}
+            </span>
+          </div>
         </div>
       )}
     </div>

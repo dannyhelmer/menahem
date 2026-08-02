@@ -85,6 +85,71 @@ function pickPrimaryIntent(intents: Set<PoliticalIntent>): PoliticalIntent {
   return "political";
 }
 
+// The search phase (provider query + page fetches) must never be allowed to
+// hang the response -- previously there was no ceiling at all beyond each
+// individual fetch's own timeout, and those ran sequentially, so a slow
+// provider or a handful of slow pages could stall the entire reply for a
+// minute or more with the user seeing nothing but bouncing dots. 18s leaves
+// headroom under the requested 20-30s total budget for the model's own
+// generation to still start in time.
+const SEARCH_TIMEOUT_MS = 18_000;
+// From "start generating" to the first streamed token -- covers the case
+// where the model call itself hangs (slow/stuck provider) even after the
+// search phase's own timeout has already been accounted for. Once a single
+// token has arrived the watchdog stands down; a long but ACTIVELY streaming
+// answer is never cut off by this.
+const FIRST_TOKEN_TIMEOUT_MS = 25_000;
+
+class TimeoutError extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new TimeoutError(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+// Combines the request's own abort signal (client disconnected) with a
+// timer that only fires if no token has arrived yet -- markFirstToken()
+// disarms it permanently the moment real generation starts.
+function createFirstTokenWatchdog(baseSignal: AbortSignal, ms: number) {
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort();
+  baseSignal.addEventListener("abort", forwardAbort);
+  let gotFirstToken = false;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    if (!gotFirstToken) {
+      timedOut = true;
+      controller.abort();
+    }
+  }, ms);
+
+  return {
+    signal: controller.signal,
+    markFirstToken: () => {
+      if (!gotFirstToken) {
+        gotFirstToken = true;
+        clearTimeout(timer);
+      }
+    },
+    didTimeOut: () => timedOut,
+    cleanup: () => {
+      clearTimeout(timer);
+      baseSignal.removeEventListener("abort", forwardAbort);
+    },
+  };
+}
+
 const MAX_DOCUMENT_CONTEXT_LENGTH = 50_000;
 
 // Phase 15: folds an uploaded document's real, extracted text into liveData
@@ -407,9 +472,28 @@ async function routeMessage(
     // we use it directly here instead of calling resolveFollowupTopic again.
     console.log(`[web-search] raw query sent to search provider: "${text}"`);
 
-    const searchResult = await runSearchForMessage(text, needsLiveInfo ? 10 : 6, {
-      preferRecent: detectRecencyNeed(text),
-    });
+    let searchResult: Awaited<ReturnType<typeof runSearchForMessage>>;
+    try {
+      searchResult = await withTimeout(
+        runSearchForMessage(text, needsLiveInfo ? 10 : 6, {
+          preferRecent: detectRecencyNeed(text),
+          onProgress: (update) => onStage(update.label),
+        }),
+        SEARCH_TIMEOUT_MS,
+        "search",
+      );
+    } catch (err) {
+      // Search genuinely timed out or threw unexpectedly -- this must never
+      // hang the response. Log it, then fall through exactly like a normal
+      // "search failed" outcome so the model still answers from its own
+      // knowledge with a plain caveat, rather than the request stalling.
+      console.error(`[web-search] search phase failed/timed out for "${text.slice(0, 120)}":`, err);
+      searchResult = {
+        success: false,
+        note: "Live web search is temporarily unavailable right now (it took too long to respond).",
+      };
+    }
+
     if (searchResult.success && searchResult.liveData) {
       liveDataParts.push(searchResult.liveData);
       sources = searchResult.sources;
@@ -419,9 +503,11 @@ async function routeMessage(
       // came up empty/failed instead, which is the true situation.
       liveDataParts.push(
         (searchResult.note ?? "Web search ran but returned no usable results.") +
-          " A web search WAS attempted for this message -- do not claim you lack web browsing capability. " +
-          "Instead, tell the user plainly that the search didn't return relevant current results for this " +
-          "specific query, and answer from general knowledge only if you clearly label it as such.",
+          " A web search WAS attempted for this message -- do not claim you lack web browsing capability, and " +
+          "do not say something like \"I will run a search\" or \"let me check\" since that search has already " +
+          "happened and is done. Tell the user plainly, in past tense, that live search is temporarily " +
+          "unavailable or didn't return relevant results for this specific query, then answer from your " +
+          "existing knowledge, clearly labeled as such rather than presented as freshly verified.",
       );
     }
   } else if (webSearchEnabled) {
@@ -518,7 +604,11 @@ export const POST = withAuth(async (request, _ctx, user) => {
       const writeFrame = (frame: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`${JSON.stringify(frame)}\n`));
       };
-      const onStage = (label: string) => writeFrame({ type: "status", category: "deep_research", label });
+      // Shared progress-frame emitter -- used by both Deep Research's own
+      // stage callback and plain Web Search's per-source progress below.
+      // `category` isn't consumed client-side (only `label` is displayed),
+      // so this is purely a server-log/debugging label, not a behavior switch.
+      const onStage = (label: string) => writeFrame({ type: "status", category: "progress", label });
 
       try {
         // ---- Subscription limit check: message count ----
@@ -567,14 +657,31 @@ export const POST = withAuth(async (request, _ctx, user) => {
             { role: "system", content: await buildSystemPrompt(undefined, user.id) },
             ...messages,
           ];
-          const { truncated } = await provider.streamChat(
-            fullMessages,
-            (piece) => {
-              assistantText += piece;
-              writeFrame({ type: "token", value: piece });
-            },
-            { signal: request.signal },
-          );
+          const watchdog = createFirstTokenWatchdog(request.signal, FIRST_TOKEN_TIMEOUT_MS);
+          let truncated: boolean;
+          try {
+            ({ truncated } = await provider.streamChat(
+              fullMessages,
+              (piece) => {
+                watchdog.markFirstToken();
+                assistantText += piece;
+                writeFrame({ type: "token", value: piece });
+              },
+              { signal: watchdog.signal },
+            ));
+          } catch (err) {
+            if (watchdog.didTimeOut()) {
+              console.error(`[chat] model call timed out after ${FIRST_TOKEN_TIMEOUT_MS}ms with no token (continuation)`);
+              writeFrame({
+                type: "error",
+                message: "I'm having trouble retrieving a response right now. Please try again in a moment.",
+              });
+              return;
+            }
+            throw err;
+          } finally {
+            watchdog.cleanup();
+          }
 
           const finalText = truncated ? trimToSentenceBoundary(assistantText) : assistantText;
           if (truncated) writeFrame({ type: "truncated", content: finalText });
@@ -674,15 +781,31 @@ export const POST = withAuth(async (request, _ctx, user) => {
             `[web-search] final system prompt sent to model (${systemPrompt.length} chars). Live data section:\n` +
               (liveData ?? "(none)"),
           );
-          const result = await provider.streamChat(
-            fullMessages,
-            (piece) => {
-              assistantText += piece;
-              writeFrame({ type: "token", value: piece });
-            },
-            { signal: request.signal, maxTokens },
-          );
-          truncated = result.truncated;
+          const watchdog = createFirstTokenWatchdog(request.signal, FIRST_TOKEN_TIMEOUT_MS);
+          try {
+            const result = await provider.streamChat(
+              fullMessages,
+              (piece) => {
+                watchdog.markFirstToken();
+                assistantText += piece;
+                writeFrame({ type: "token", value: piece });
+              },
+              { signal: watchdog.signal, maxTokens },
+            );
+            truncated = result.truncated;
+          } catch (err) {
+            if (watchdog.didTimeOut()) {
+              console.error(`[chat] model call timed out after ${FIRST_TOKEN_TIMEOUT_MS}ms with no token`);
+              writeFrame({
+                type: "error",
+                message: "I'm having trouble retrieving a response right now. Please try again in a moment.",
+              });
+              return;
+            }
+            throw err;
+          } finally {
+            watchdog.cleanup();
+          }
         }
 
         if (truncated) {

@@ -9,6 +9,12 @@ export interface UiMessage extends ChatMessage {
   id: string;
   error?: boolean;
   statusLabel?: string;
+  // Accumulates every status update received while this message is still
+  // streaming (e.g. "Searching trusted government and news sources...",
+  // "✓ Reuters", "✓ Congress.gov", "Generating response...") so the
+  // "thinking" indicator can show real progress instead of just bouncing
+  // dots with no explanation for however long the search phase takes.
+  searchProgress?: string[];
   sources?: { title: string; url: string }[];
   confidence?: "high" | "medium" | "low";
   confidenceReason?: string;

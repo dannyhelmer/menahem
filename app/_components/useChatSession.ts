@@ -48,6 +48,34 @@ interface StreamFrame {
 // both a fresh send and a "Continue Report" resume, which differ only in
 // how they interpret a `token`/`truncated` frame's content, not in how
 // frames are parsed off the wire.
+// Client-side backstop -- if the server ever goes fully silent (no frame at
+// all, not even a status update) for this long, treat it as a hang rather
+// than waiting forever. This should rarely fire given the server's own
+// search/model timeouts, but a network hiccup or an unforeseen server bug
+// must never leave the UI stuck with no feedback and no way out.
+const STREAM_STALL_TIMEOUT_MS = 35_000;
+
+class StreamStallError extends Error {}
+
+function raceWithStall<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new StreamStallError(`No data received for ${STREAM_STALL_TIMEOUT_MS}ms`)),
+      STREAM_STALL_TIMEOUT_MS,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 async function parseChatStream(
   response: Response,
   handlers: {
@@ -66,7 +94,18 @@ async function parseChatStream(
   let buffer = "";
 
   while (true) {
-    const { done, value } = await reader.read();
+    let done: boolean, value: Uint8Array | undefined;
+    try {
+      ({ done, value } = await raceWithStall(reader.read()));
+    } catch (err) {
+      if (err instanceof StreamStallError) {
+        console.error("[chat] stream stalled with no data:", err.message);
+        handlers.onError("I'm having trouble retrieving a response right now. Please try again in a moment.");
+        reader.cancel().catch(() => {});
+        return;
+      }
+      throw err;
+    }
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
@@ -196,7 +235,11 @@ export function useChatSession({
 
   function setAssistantStatusLabel(assistantId: string, statusLabel: string) {
     setMessages((prev) =>
-      prev.map((message) => (message.id === assistantId ? { ...message, statusLabel } : message)),
+      prev.map((message) =>
+        message.id === assistantId
+          ? { ...message, statusLabel, searchProgress: [...(message.searchProgress ?? []), statusLabel] }
+          : message,
+      ),
     );
   }
 
