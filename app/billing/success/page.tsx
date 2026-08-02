@@ -23,7 +23,7 @@ export default function BillingSuccessPage() {
         <div className="space-y-2 text-sm text-neutral-600 dark:text-neutral-300">
           <p>Your Pro subscription is being activated.</p>
           <p>
-            You now have access to Political Workspace projects, multi-document analysis,
+            You now have access to Political Workspace, comparing multiple documents,
             unlimited saved conversations, unlimited document uploads, and 2,500 AI messages
             per month.
           </p>

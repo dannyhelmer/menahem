@@ -199,7 +199,7 @@ export async function checkMultiDocument(user: User): Promise<LimitResult> {
       current: 0,
       max: 0,
       plan,
-      reason: "Multi-document analysis is a Pro feature. Upgrade to Pro to analyze multiple documents together.",
+      reason: "Comparing multiple documents is a Pro feature. Upgrade to Pro to compare multiple documents.",
     };
   }
 
