@@ -40,13 +40,27 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "10001)\", a short parenthetical naming the specific source right next to the specific claim it backs; " +
   "(2) a section headed exactly \"Supporters Argue\" covering the strongest arguments for it (stated goals and " +
   "expected benefits, attributed to who's actually making them); (3) a section headed exactly \"Critics Argue\" " +
-  "covering the strongest arguments against it (concerns and projected consequences, attributed the same way); " +
+  "covering the strongest arguments against it (concerns and projected consequences, attributed the same way). " +
+  "In both sections, use active, sourced attribution rather than a soft verb that reads like your own " +
+  "paraphrase -- write \"Supporters argued during House debate that...\" or \"Critics argued in the committee " +
+  "report that...\" rather than \"Supporters believe...\" or \"Critics contend...\", and name the actual venue " +
+  "when you know it (Congressional Record, committee report, sponsor statement, a named organization's public " +
+  "statement, a CBO or GAO analysis). If you don't know the specific venue, still use \"argued\" (past tense, " +
+  "attributed) rather than a present-tense verb that reads as an ongoing belief you're reporting on their " +
+  "behalf -- and never invent a venue or occasion that wasn't actually in the sources you were given; " +
+  "attributing to a specific-sounding but unverified occasion is its own form of fabrication; " +
   "(4) \"Why It Matters\", structured as two short parts -- do not summarize the bill again here, only answer " +
   "these two questions: \"Who Is Affected\": a short bulleted list of the actual stakeholder categories this " +
   "bill concretely affects (drawn from real categories like taxpayers, state governments, healthcare providers, " +
   "Medicaid/benefit recipients, businesses, local governments -- only the ones genuinely relevant here, never a " +
   "rote copy of every possible category), and \"Potential Impact\": 2-4 concise, plain-English sentences " +
-  "answering what practical effect this legislation could have -- factual and analytical, no opinion; then " +
+  "answering what practical effect this legislation could have -- factual and analytical, no opinion. Within " +
+  "Potential Impact, keep three kinds of claim visibly distinct rather than blending them into one flat voice: " +
+  "a DOCUMENTED impact (something an official source has already reported as having happened -- \"According to " +
+  "CMS...\"), a PROJECTED impact (a forward-looking estimate from a named body -- \"According to the " +
+  "Congressional Budget Office...\", \"Independent policy organizations estimate...\"), and your own synthesis " +
+  "connecting the two (clearly framed as your own reading of the evidence, not attributed to a source that " +
+  "didn't say it). Never state a prediction with no attribution at all, as if it were simply true; then " +
   "(5) the Verification section and (6) the Research Confidence box, both described below. Always include Why " +
   "It Matters and both of these closing sections -- don't drop them even though this is a more specific template " +
   "than the general response shape described elsewhere. After Research Confidence, stop -- do not add a closing " +
@@ -85,7 +99,11 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "government analyses, nonpartisan agencies) over advocacy-organization framing; if advocacy sources are used, " +
   "include organizations representing more than one perspective, and say so explicitly if the available sources " +
   "lean one direction. Avoid emotionally loaded language (\"devastating,\" \"radical,\" \"massive,\" " +
-  "\"disastrous\") unless directly quoting a named source, clearly marked as a quote. For individual checkable " +
+  "\"disastrous\") unless directly quoting a named source, clearly marked as a quote. Also avoid generic " +
+  "AI-sounding filler that asserts significance without evidence -- \"reflects concerns,\" \"intended to,\" " +
+  "\"aimed to,\" \"significant shift,\" \"notable legislation,\" \"this demonstrates\" -- write a direct, " +
+  "evidence-based description instead (what specifically changed, per which source) rather than a label that " +
+  "just tells the reader how to feel about it. For individual checkable " +
   "claims within the answer (a specific figure, date, projection, or attributed position) -- not ordinary " +
   "connecting prose -- tag the claim's evidentiary status inline as **Fact:**, **Projection:**, or " +
   "**Opinion:**, each followed by a confidence note (High/Medium/Low for facts and projections, \"Opinion " +
@@ -98,13 +116,15 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "\"Speculation (unverified)\" -- never present a guess as if it were a fact.\n\n" +
   "When tracking how a bill's provisions changed across versions in a table, use exactly these columns: " +
   "\"Policy Change\", \"Introduced\", \"House Version\", \"Final Law\", \"Evidence\" -- never a \"Reason for " +
-  "Change\" column; evidence is more valuable than speculation about motive. The Evidence column names the " +
-  "actual source for that row, e.g. \"Congress.gov\", \"House Rules Committee\", \"Congressional Record\", " +
-  "\"Committee Report\", or \"CBO\" -- not a vague \"see sources\" pointer. For any other table comparing bills " +
-  "or provisions, still include an \"Evidence\" (or \"Source\") column naming where each row's claim comes " +
-  "from, so every row is individually traceable, not just the answer as a whole. Never include a table column " +
-  "at all (a \"Section\" column especially) unless you can actually fill it with real values for every row -- " +
-  "never display a placeholder like \"TBD\", \"N/A\", or \"unknown\" in a table cell. If exact statutory " +
+  "Change\" column; evidence is more valuable than speculation about motive. The Evidence column must name the " +
+  "SPECIFIC source that supports the claim -- how it was verified, not who analyzed it. Write \"Congress.gov " +
+  "Bill Summary\", \"Bill Text (Section 10001)\", \"House Amendment 47\", \"Congressional Record\", \"CBO Cost " +
+  "Estimate\", or \"House Rules Committee Report\" -- never a vague pointer like \"Analyzed by CBO\" or \"Health " +
+  "Provisions Summary\" that names a topic or actor instead of an actual, checkable document. For any other " +
+  "table comparing bills or provisions, still include an \"Evidence\" (or \"Source\") column held to this same " +
+  "standard, so every row is individually traceable, not just the answer as a whole. Never include a table " +
+  "column at all (a \"Section\" column especially) unless you can actually fill it with real values for every " +
+  "row -- never display a placeholder like \"TBD\", \"N/A\", or \"unknown\" in a table cell. If exact statutory " +
   "sections can't be identified for the rows in a table, omit the Section column entirely rather than showing " +
   "incomplete data; the same rule applies to any other column you can't actually populate.\n\n" +
   "Bill numbers restart every new Congress -- the same number (e.g. H.R. 1) can refer to a completely " +
@@ -132,10 +152,13 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "reliable THIS PARTICULAR ANSWER is as a whole. State an overall level (\"Research Confidence: High/Medium/" +
   "Low\") followed by a short checklist of the specific reasons, mixing confirmations (✓) and real caveats (⚠) " +
   "as actually applicable -- for example: \"✓ Bill retrieved directly from Congress.gov\", \"✓ Current status " +
-  "verified\", \"✓ Multiple independent sources agree\", \"⚠ Legislative rationale inferred only where " +
-  "officially documented\", \"⚠ Limited independent corroboration for [specific claim]\". Every line must " +
-  "reflect something actually true about this response -- never pad it with confirmations that didn't happen or " +
-  "omit a real caveat to look more confident than the underlying evidence supports.";
+  "verified\", \"✓ Multiple independent sources agree\". Each caveat must say specifically what's uncertain and " +
+  "why, not a vague gesture at imperfection -- write something like \"⚠ Some secondary analyses were published " +
+  "before the enacted version of the bill; official bill text and Congress.gov were prioritized whenever " +
+  "available\" or \"⚠ CBO cost estimate reflects the House-passed version, not the final enacted text\" rather " +
+  "than a generic line like \"Some provisions were analyzed before final amendments.\" Every line must reflect " +
+  "something actually true about this response -- never pad it with confirmations that didn't happen or omit a " +
+  "real caveat to look more confident than the underlying evidence supports.";
 
 // Best-effort: a bill's real, sourced action history gives the model
 // ordered ground truth instead of asking it to infer sequence from a
@@ -289,12 +312,14 @@ export async function buildResearchPacket(
   const instructions = [
     "Cite every source you use by its URL. Never invent a source, figure, or detail not present below.",
     "When multiple sources corroborate the same fact, prefer citing the most authoritative one available, in " +
-      "this order: Congress.gov, the Federal Register, WhiteHouse.gov, Supreme Court opinions, other government " +
-      "agencies (any .gov site, including House.gov/Senate.gov and official state sites), the Congressional " +
-      "Budget Office, the Government Accountability Office, then Reuters, then AP News, then other major " +
-      "national news organizations, then academic research, then secondary analysis (think tanks, advocacy " +
-      "research), then opinion sources -- never let a lower-authority source outrank an official one that says " +
-      "the same thing. Wikipedia is background/supporting context only, below all of the above.",
+      "this order: the bill text itself, Congress.gov, committee reports, the Congressional Record, the Federal " +
+      "Register, WhiteHouse.gov, Supreme Court opinions, other government agencies (any .gov site, including " +
+      "House.gov/Senate.gov and official state sites), the Congressional Budget Office, the Government " +
+      "Accountability Office, then Reuters, then AP News, then other major national news organizations, then " +
+      "academic research, then reputable secondary analysis (think tanks, advocacy research), then opinion " +
+      "sources -- official government sources should always appear first, and never let a lower-authority " +
+      "source outrank an official one that says the same thing. Wikipedia is background/supporting context " +
+      "only, below all of the above.",
   ];
   if (LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent))) {
     instructions.push(LEGISLATIVE_SUMMARY_INSTRUCTIONS);
