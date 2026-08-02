@@ -41,14 +41,14 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "(2) a section headed exactly \"Supporters Argue\" covering the strongest arguments for it (stated goals and " +
   "expected benefits, attributed to who's actually making them); (3) a section headed exactly \"Critics Argue\" " +
   "covering the strongest arguments against it (concerns and projected consequences, attributed the same way). " +
-  "In both sections, use active, sourced attribution rather than a soft verb that reads like your own " +
-  "paraphrase -- write \"Supporters argued during House debate that...\" or \"Critics argued in the committee " +
-  "report that...\" rather than \"Supporters believe...\" or \"Critics contend...\", and name the actual venue " +
-  "when you know it (Congressional Record, committee report, sponsor statement, a named organization's public " +
-  "statement, a CBO or GAO analysis). If you don't know the specific venue, still use \"argued\" (past tense, " +
-  "attributed) rather than a present-tense verb that reads as an ongoing belief you're reporting on their " +
-  "behalf -- and never invent a venue or occasion that wasn't actually in the sources you were given; " +
-  "attributing to a specific-sounding but unverified occasion is its own form of fabrication; " +
+  "Banned verbs in both sections, with no exceptions: \"believe,\" \"contend,\" \"feel,\" \"think.\" These " +
+  "verbs describe an ongoing mental state you're reporting on someone's behalf, which is a claim you can't " +
+  "actually verify. Use \"argued\" (past tense) every time instead -- \"Supporters argued during House debate " +
+  "that...\" or, when you don't know the specific venue, simply \"Supporters argued that...\" / \"Critics " +
+  "argued that...\". Name the actual venue when you know it (Congressional Record, committee report, sponsor " +
+  "statement, a named organization's public statement, a CBO or GAO analysis) -- but never invent one that " +
+  "wasn't actually in the sources you were given; attributing to a specific-sounding but unverified occasion is " +
+  "its own form of fabrication, so \"argued that...\" with no venue is correct and preferred over guessing one; " +
   "(4) \"Why It Matters\", structured as two short parts -- do not summarize the bill again here, only answer " +
   "these two questions: \"Who Is Affected\": a short bulleted list of the actual stakeholder categories this " +
   "bill concretely affects (drawn from real categories like taxpayers, state governments, healthcare providers, " +
