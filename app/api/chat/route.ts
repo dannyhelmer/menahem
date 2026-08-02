@@ -723,7 +723,11 @@ export const POST = withAuth(async (request, _ctx, user) => {
           ? [...(sources ?? []), { title: documentSource.filename, url: `/api/documents/${documentSource.id}/file` }]
           : sources;
 
-        writeFrame({ type: "status", category, label });
+        // Skip for web_search -- the real-time progress checklist emitted
+        // during the search itself (onStage, above) already covered this;
+        // writing it again here would just append a redundant "Searching
+        // the web" line after "Generating response..." already appeared.
+        if (category !== "web_search") writeFrame({ type: "status", category, label });
         if (allSources && allSources.length > 0) writeFrame({ type: "sources", sources: allSources });
         if (confidence) writeFrame({ type: "confidence", level: confidence, reason: confidenceReason });
         if (followups && followups.length > 0) writeFrame({ type: "followups", suggestions: followups });
