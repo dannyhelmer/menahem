@@ -41,6 +41,20 @@ export function friendlySourceName(url: string): string {
   }
 }
 
+const SOCIAL_MEDIA_DOMAINS = new Set([
+  "facebook.com", "m.facebook.com", "twitter.com", "x.com", "instagram.com",
+  "tiktok.com", "reddit.com", "threads.net", "linkedin.com",
+]);
+
+function isSocialMediaUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return SOCIAL_MEDIA_DOMAINS.has(host);
+  } catch {
+    return false;
+  }
+}
+
 export interface SearchSource {
   title: string;
   url: string;
@@ -124,11 +138,18 @@ export async function runSearchForMessage(
     }
   }
 
+  // Social-media posts are essentially never a citable source for a
+  // government-research platform (no editorial process, easily spoofed,
+  // often just someone reacting to the actual news) -- excluded entirely
+  // rather than merely ranked low, so one doesn't consume a fetch slot
+  // that a real secondary source could have used instead.
+  const filtered = results.filter((r) => !isSocialMediaUrl(r.url));
+
   // Sort by source authority before deciding which pages are actually worth
   // fetching -- otherwise an official/authoritative source that happened to
   // rank lower in raw provider relevance never gets a chance at all once
   // the list is sliced down to MAX_PAGES_TO_FETCH.
-  const ranked = [...results].sort((a, b) => sourceAuthorityRank(b.url) - sourceAuthorityRank(a.url));
+  const ranked = filtered.sort((a, b) => sourceAuthorityRank(b.url) - sourceAuthorityRank(a.url));
   const candidates = ranked.slice(0, MAX_PAGES_TO_FETCH);
 
   onProgress({ label: "Searching trusted government and news sources..." });
