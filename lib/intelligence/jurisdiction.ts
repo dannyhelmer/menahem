@@ -5,7 +5,7 @@ import { STATE_NAME_TO_CODE } from "@/lib/data/us-states";
 export type Jurisdiction = "federal" | "state" | "local";
 
 export const LOCAL_LEVEL_RE =
-  /\b(city council|county commissioner\w*|county board|school board|park district|municipal\w*|mayor\w*|county clerk|county election\w*|local election\w*|town council|village board|city government|township trustee\w*|planning commission\w*)\b/i;
+  /\b(city council|county commissioner\w*|county board|school board|park district|municipal\w*|mayor\w*|county clerk|county election\w*|local election\w*|town council|village board|city government|township trustee\w*|planning commission\w*|ordinance\w*|zoning\w*)\b/i;
 
 const STATE_LEVEL_RE =
   /\b(governors?|state senate|state house|state legislature|secretary of state|state attorney general|state court\w*|state supreme court|state campaign finance|state ethics commission|state representative\w*|state senator\w*)\b/i;
