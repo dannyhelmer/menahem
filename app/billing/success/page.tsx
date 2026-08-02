@@ -23,8 +23,9 @@ export default function BillingSuccessPage() {
         <div className="space-y-2 text-sm text-neutral-600 dark:text-neutral-300">
           <p>Your Pro subscription is being activated.</p>
           <p>
-            You now have access to Deep Research mode, multi-document analysis, research
-            reports, exports, and 2,500 AI messages per month.
+            You now have access to Political Workspace projects, multi-document analysis,
+            PDF/DOCX exports, unlimited saved conversations, unlimited document uploads, and
+            2,500 AI messages per month.
           </p>
           <p className="text-neutral-400 dark:text-neutral-500">
             If your access is not active within a few minutes, try refreshing the page.

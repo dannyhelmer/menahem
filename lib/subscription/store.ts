@@ -206,6 +206,31 @@ export async function incrementUploadCount(userId: string): Promise<UsageRecord>
   return mapUsage(rows[0]);
 }
 
+// Free-plan usage has no Stripe billing cycle to anchor a reset to (that's
+// only set up for paying subscribers via the webhook -- see
+// app/api/stripe/webhook/route.ts), so without this, a free user's message/
+// upload counters would just accumulate forever and never actually reset
+// "every month" the way the pricing page promises. Lazily resets on read:
+// if the stored cycle start is in a different calendar month than now,
+// roll it forward to the current month before the caller reads usage.
+// Pro users are intentionally left alone here -- their cycle is the real
+// Stripe billing period, which usually doesn't align to calendar months.
+export async function ensureCurrentUsageCycle(userId: string, plan: string): Promise<UsageRecord> {
+  const usage = await getUsage(userId);
+  if (plan === "pro") return usage;
+
+  const now = new Date();
+  const cycleStart = new Date(usage.billingCycleStart);
+  const sameCalendarMonth =
+    cycleStart.getUTCFullYear() === now.getUTCFullYear() && cycleStart.getUTCMonth() === now.getUTCMonth();
+  if (sameCalendarMonth) return usage;
+
+  const newCycleStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const newCycleEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  await resetUsageForNewCycle(userId, newCycleStart.toISOString(), newCycleEnd.toISOString());
+  return getUsage(userId);
+}
+
 export async function resetUsageForNewCycle(
   userId: string,
   cycleStart: string,

@@ -139,7 +139,7 @@ export default function DocumentUpload({ projectId }: { projectId: string }) {
             href="/pricing"
             className="text-burgundy mt-1.5 inline-block text-xs font-medium hover:underline"
           >
-            Upgrade to Pro for more uploads
+            Upgrade to Pro for unlimited uploads
           </Link>
         </div>
       )}

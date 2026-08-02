@@ -7,10 +7,13 @@ export type PlanTier = "free" | "pro";
 export interface PlanLimits {
   /** Max AI messages per billing cycle. */
   maxMessagesPerMonth: number;
-  /** Max document uploads per rolling 24h window (free) or per month (pro). */
+  /** Max document uploads per window. Ignored when uploadWindow is "unlimited". */
   maxUploadsPerWindow: number;
-  /** Upload window type: "rolling_24h" for free, "monthly" for pro. */
-  uploadWindow: "rolling_24h" | "monthly";
+  /** Upload window type: "rolling_24h" for free, "unlimited" for pro. */
+  uploadWindow: "rolling_24h" | "unlimited";
+  // Not advertised on the pricing page (per product decision), but still
+  // enforced server-side as a sane ceiling against abuse/cost -- removing
+  // the marketing line isn't the same as removing the actual safeguard.
   /** Max file size per upload in bytes. */
   maxFileSizeBytes: number;
   /** Whether multi-document analysis is allowed. */
@@ -21,32 +24,28 @@ export interface PlanLimits {
   exportEnabled: boolean;
   /** Max saved conversations (null = unlimited). */
   maxConversations: number | null;
-  /** Whether priority processing queue is used. */
-  priorityQueue: boolean;
 }
 
 export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
   free: {
-    maxMessagesPerMonth: 100,
+    maxMessagesPerMonth: 250,
     maxUploadsPerWindow: 3,
     uploadWindow: "rolling_24h",
     maxFileSizeBytes: 10 * 1024 * 1024, // 10 MB
     multiDocumentAnalysis: false,
-    deepResearch: false,
+    deepResearch: true,
     exportEnabled: false,
     maxConversations: 10,
-    priorityQueue: false,
   },
   pro: {
     maxMessagesPerMonth: 2500,
-    maxUploadsPerWindow: 100,
-    uploadWindow: "monthly",
+    maxUploadsPerWindow: Infinity,
+    uploadWindow: "unlimited",
     maxFileSizeBytes: 100 * 1024 * 1024, // 100 MB
     multiDocumentAnalysis: true,
     deepResearch: true,
     exportEnabled: true,
     maxConversations: null, // unlimited
-    priorityQueue: true,
   },
 };
 

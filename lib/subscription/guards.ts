@@ -4,7 +4,7 @@
 // limits for UX; the backend is the real enforcement point.
 
 import type { User } from "@/lib/auth/users";
-import { getSubscription, getUsage, getRolling24hUploadCount, getMonthlyUploadCount, getConversationCount } from "./store";
+import { getSubscription, ensureCurrentUsageCycle, getRolling24hUploadCount, getConversationCount } from "./store";
 import { getPlanLimits, isProPlan } from "./plans";
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ async function resolvePlan(user: User): Promise<string> {
 export async function checkMessageLimit(user: User): Promise<LimitResult> {
   const plan = await resolvePlan(user);
   const limits = getPlanLimits(plan);
-  const usage = await getUsage(user.id);
+  const usage = await ensureCurrentUsageCycle(user.id, plan);
 
   const current = usage.messagesThisCycle;
   const max = limits.maxMessagesPerMonth;
@@ -58,7 +58,9 @@ export async function checkMessageLimit(user: User): Promise<LimitResult> {
       current,
       max,
       plan,
-      reason: `You've used all ${max} AI messages for this billing cycle. Upgrade to Pro for 2,500 messages per month.`,
+      reason: isProPlan(plan)
+        ? `You've used all ${max} AI messages for this billing cycle. Your allowance resets at the start of your next cycle.`
+        : `You've used all ${max} AI messages for this month. Your allowance resets on the 1st, or upgrade to Pro for 2,500 messages per month.`,
     };
   }
 
@@ -73,30 +75,14 @@ export async function checkUploadLimit(user: User): Promise<LimitResult> {
   const plan = await resolvePlan(user);
   const limits = getPlanLimits(plan);
 
-  if (limits.uploadWindow === "rolling_24h") {
-    // Free plan: rolling 24h window
-    const window = await getRolling24hUploadCount(user.id);
-    const current = window.count;
-    const max = limits.maxUploadsPerWindow;
-
-    if (current >= max) {
-      return {
-        allowed: false,
-        current,
-        max,
-        plan,
-        nextAvailableAt: window.nextAvailableAt ?? undefined,
-        reason: `You've uploaded ${current} documents within the last 24 hours. Your next upload becomes available when the oldest one expires.`,
-      };
-    }
-
-    return { allowed: true, current, max, plan };
+  // Pro: unlimited document uploads -- no count to check at all.
+  if (limits.uploadWindow === "unlimited") {
+    return { allowed: true, current: 0, max: Infinity, plan };
   }
 
-  // Pro plan: monthly window
-  const sub = await getSubscription(user.id);
-  const cycleStart = sub?.currentPeriodStart ?? new Date(0).toISOString();
-  const current = await getMonthlyUploadCount(user.id, cycleStart);
+  // Free: rolling 24h window.
+  const window = await getRolling24hUploadCount(user.id);
+  const current = window.count;
   const max = limits.maxUploadsPerWindow;
 
   if (current >= max) {
@@ -105,7 +91,8 @@ export async function checkUploadLimit(user: User): Promise<LimitResult> {
       current,
       max,
       plan,
-      reason: `You've uploaded ${current} documents this billing cycle. Your upload count resets at the start of your next cycle.`,
+      nextAvailableAt: window.nextAvailableAt ?? undefined,
+      reason: `You've uploaded ${current} documents within the last 24 hours. Your next upload becomes available when the oldest one expires, or upgrade to Pro for unlimited uploads.`,
     };
   }
 
@@ -233,7 +220,6 @@ export interface UsageSummary {
     deepResearch: boolean;
     multiDocument: boolean;
     exportEnabled: boolean;
-    priorityQueue: boolean;
   };
   subscription?: {
     status: string;
@@ -245,19 +231,16 @@ export interface UsageSummary {
 export async function getUsageSummary(user: User): Promise<UsageSummary> {
   const plan = await resolvePlan(user);
   const limits = getPlanLimits(plan);
-  const usage = await getUsage(user.id);
+  const usage = await ensureCurrentUsageCycle(user.id, plan);
   const sub = await getSubscription(user.id);
 
-  // Upload count depends on window type
+  // Upload count depends on window type -- unlimited (pro) has nothing to count.
   let uploadUsed = 0;
   let nextAvailableAt: string | undefined;
   if (limits.uploadWindow === "rolling_24h") {
     const window = await getRolling24hUploadCount(user.id);
     uploadUsed = window.count;
     nextAvailableAt = window.nextAvailableAt ?? undefined;
-  } else {
-    const cycleStart = sub?.currentPeriodStart ?? new Date(0).toISOString();
-    uploadUsed = await getMonthlyUploadCount(user.id, cycleStart);
   }
 
   const convCount = await getConversationCount(user.id);
@@ -272,7 +255,6 @@ export async function getUsageSummary(user: User): Promise<UsageSummary> {
       deepResearch: limits.deepResearch,
       multiDocument: limits.multiDocumentAnalysis,
       exportEnabled: limits.exportEnabled,
-      priorityQueue: limits.priorityQueue,
     },
     subscription: sub
       ? {
