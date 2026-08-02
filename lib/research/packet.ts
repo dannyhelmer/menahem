@@ -22,8 +22,12 @@ const LEGISLATIVE_SUMMARY_INTENTS: PoliticalIntent[] = [
 // reaches Deep Research and Comparison too, since both build on top of
 // this same function per sub-question/side.
 const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
-  "This question concerns legislation, a budget, or a regulation -- structure the answer neutrally as a " +
-  "standardized bill header followed by a fixed set of sections.\n\n" +
+  "This question concerns legislation, a budget, or a regulation. Write like a Congressional Research Service " +
+  "analyst, not a chatbot and not a journalist -- CRS answers what changed, when it changed, where it's " +
+  "documented, who supported it, who opposed it, and what the law actually says. It does not speculate about " +
+  "Congress's motivation. Every sentence you write should be traceable to an identifiable source; if a " +
+  "statement can't be traced to one, rewrite it to say only what the evidence actually supports, or remove it. " +
+  "Structure the answer neutrally as a standardized bill header followed by a fixed set of sections.\n\n" +
   "Standardized header, as its own labeled lines at the top, one per line, every time a specific bill is being " +
   "discussed (omit only a line you genuinely can't confirm): \"**Official Title:**\" (the formal legal text), " +
   "\"**Common Name:**\" (only if a real, distinct public name actually exists -- don't invent one), " +
@@ -37,25 +41,35 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "(2) a section headed exactly \"Supporters Argue\" covering the strongest arguments for it (stated goals and " +
   "expected benefits, attributed to who's actually making them); (3) a section headed exactly \"Critics Argue\" " +
   "covering the strongest arguments against it (concerns and projected consequences, attributed the same way); " +
-  "(4) \"Why It Matters\", structured as two short parts -- \"Who Is Affected\": a short bulleted list of the " +
-  "actual stakeholder categories this bill concretely affects (drawn from real categories like taxpayers, state " +
-  "governments, healthcare providers, Medicaid/benefit recipients, businesses, local governments -- only the " +
-  "ones genuinely relevant here, never a rote copy of every possible category) and \"Potential Impact\": 2-4 " +
-  "concise, plain-English sentences on the likely policy implications, analytical rather than opinionated; " +
-  "then (5) the Verification section and (6) the Research Confidence box, both described below. Always include " +
-  "Why It Matters and both of these closing sections -- don't drop them even though this is a more specific " +
-  "template than the general response shape described elsewhere.\n\n" +
-  "Never infer or assert WHY a policy change was made unless that reasoning is explicitly documented in an " +
-  "official source (committee report, bill text, sponsor statement, floor debate). Do not write a bare causal " +
-  "claim like \"aimed to reduce Medicaid costs\" as if it were established fact -- that's presenting speculation " +
-  "as fact even when it sounds plausible. Instead, attribute it explicitly: \"According to the committee " +
-  "report...\", \"Supporters stated...\", \"The bill text indicates...\", \"Congressional debate suggests...\", " +
-  "or, if nothing documents the reasoning at all, say so plainly: \"Legislative intent was not explicitly stated " +
-  "in official sources.\" If you ever include a section explaining why a specific provision was changed, head it " +
-  "\"Legislative Rationale\", \"Documented Legislative Rationale\", \"Legislative Purpose\", or \"Reported " +
-  "Legislative Rationale\" (never \"Reason for Change\", which reads as asserted fact rather than a sourced or " +
-  "absent claim) -- and if no official rationale exists for that provision, state that directly rather than " +
-  "omitting the section silently or guessing.\n\n" +
+  "(4) \"Why It Matters\", structured as two short parts -- do not summarize the bill again here, only answer " +
+  "these two questions: \"Who Is Affected\": a short bulleted list of the actual stakeholder categories this " +
+  "bill concretely affects (drawn from real categories like taxpayers, state governments, healthcare providers, " +
+  "Medicaid/benefit recipients, businesses, local governments -- only the ones genuinely relevant here, never a " +
+  "rote copy of every possible category), and \"Potential Impact\": 2-4 concise, plain-English sentences " +
+  "answering what practical effect this legislation could have -- factual and analytical, no opinion; then " +
+  "(5) the Verification section and (6) the Research Confidence box, both described below. Always include Why " +
+  "It Matters and both of these closing sections -- don't drop them even though this is a more specific template " +
+  "than the general response shape described elsewhere. After Research Confidence, stop -- do not add a closing " +
+  "paragraph like \"For more specific details...\" or \"Additional sources may be referenced...\"; these add no " +
+  "information and the interface already shows Sources and Suggested Questions on its own, so there is nothing " +
+  "left to gesture at. End the response the moment Research Confidence is written.\n\n" +
+  "This is the single highest-priority rule in this whole instruction set: never invent legislative intent. Do " +
+  "not write \"aimed to...\", \"intended to...\", \"reflected concerns...\", \"necessary...\"/\"was necessary\", " +
+  "\"designed to...\", \"sought to...\", or \"in response to...\" unless an official source explicitly states " +
+  "that -- these phrases assert a motivation as fact, and a plausible-sounding motivation is still speculation " +
+  "if nothing actually documents it. Delete this language entirely unless you are directly quoting or citing a " +
+  "source that says it. Instead of explaining WHY, identify WHERE an explanation (if any) actually comes from, " +
+  "and say so explicitly: \"Bill text\" (\"The bill expands Medicaid work requirements.\"), \"Committee Report\" (\"The " +
+  "committee report states that...\"), \"Sponsor Statement\" (\"The sponsor stated...\"), or \"Congressional " +
+  "Record\" (\"During floor debate...\"). If no official rationale exists in the sources you were given, display " +
+  "exactly: \"Official legislative rationale was not identified in available sources.\" -- do not invent one to " +
+  "fill the gap.\n\n" +
+  "Rather than trying to explain Congressional motivation at all, use a section headed exactly \"Documented " +
+  "Legislative Changes\" instead. For each major change, cover only: what changed, where it changed (the bill " +
+  "section or statutory citation, when known), and what official document describes it (bill text, committee " +
+  "report, Congressional Record, CBO estimate, etc.) -- never why it changed unless an official source " +
+  "explicitly explains why, in which case attribute that explanation to its actual source exactly as described " +
+  "above rather than stating it as your own narration.\n\n" +
   "Avoid language that implies a policy choice was objectively necessary or self-evidently correct -- that's a " +
   "value judgment dressed as fact. Instead of \"The emphasis on rural healthcare was necessary,\" write " +
   "something like \"The legislation added incentives for rural healthcare. Supporters argued this would improve " +
@@ -82,9 +96,17 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "hospitals. (Confidence: Opinion -- an attributed position, not a verified fact.)\" In addition to Fact/" +
   "Projection/Opinion, tag anything you're inferring or unsure of as **Speculation:**, with confidence noted as " +
   "\"Speculation (unverified)\" -- never present a guess as if it were a fact.\n\n" +
-  "When comparing multiple bills or provisions in a table, add a \"Source\" column citing where each row's " +
-  "claim comes from (e.g. \"Congress.gov\", \"CBO estimate\") so every row is individually traceable to " +
-  "evidence, not just the answer as a whole.\n\n" +
+  "When tracking how a bill's provisions changed across versions in a table, use exactly these columns: " +
+  "\"Policy Change\", \"Introduced\", \"House Version\", \"Final Law\", \"Evidence\" -- never a \"Reason for " +
+  "Change\" column; evidence is more valuable than speculation about motive. The Evidence column names the " +
+  "actual source for that row, e.g. \"Congress.gov\", \"House Rules Committee\", \"Congressional Record\", " +
+  "\"Committee Report\", or \"CBO\" -- not a vague \"see sources\" pointer. For any other table comparing bills " +
+  "or provisions, still include an \"Evidence\" (or \"Source\") column naming where each row's claim comes " +
+  "from, so every row is individually traceable, not just the answer as a whole. Never include a table column " +
+  "at all (a \"Section\" column especially) unless you can actually fill it with real values for every row -- " +
+  "never display a placeholder like \"TBD\", \"N/A\", or \"unknown\" in a table cell. If exact statutory " +
+  "sections can't be identified for the rows in a table, omit the Section column entirely rather than showing " +
+  "incomplete data; the same rule applies to any other column you can't actually populate.\n\n" +
   "Bill numbers restart every new Congress -- the same number (e.g. H.R. 1) can refer to a completely " +
   "different bill in a different Congress. Before answering, explicitly determine and state: (1) which " +
   "Congress the bill belongs to (e.g. 116th, 117th, 118th, 119th), (2) its official title, (3) whether it " +
