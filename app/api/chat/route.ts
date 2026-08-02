@@ -13,7 +13,9 @@ import { isFastPathMessage, isSystemTestMessage, SYSTEM_TEST_GUIDANCE } from "@/
 import {
   detectJurisdiction,
   detectState,
+  hasLocalPlaceHint,
   JURISDICTION_CLARIFICATION_MESSAGE,
+  LOCAL_JURISDICTION_CLARIFICATION_MESSAGE,
   type Jurisdiction,
 } from "@/lib/intelligence/jurisdiction";
 import { runMathForMessage } from "@/lib/intelligence/math-tool";
@@ -142,12 +144,14 @@ function resolveJurisdictionAndState(
   return { jurisdiction, state: jurisdiction === "federal" ? null : detectState(text) };
 }
 
+const JURISDICTION_CLARIFICATION_MESSAGES = [JURISDICTION_CLARIFICATION_MESSAGE, LOCAL_JURISDICTION_CLARIFICATION_MESSAGE];
+
 function resolveJurisdictionReply(text: string, messagesSnapshot: ChatMessage[]): string {
   const priorAssistant = messagesSnapshot[messagesSnapshot.length - 2];
   const originalQuestion = messagesSnapshot[messagesSnapshot.length - 3];
   if (
     priorAssistant?.role === "assistant" &&
-    priorAssistant.content.trim() === JURISDICTION_CLARIFICATION_MESSAGE &&
+    JURISDICTION_CLARIFICATION_MESSAGES.includes(priorAssistant.content.trim()) &&
     originalQuestion?.role === "user"
   ) {
     return `${text} ${originalQuestion.content}`;
@@ -271,6 +275,30 @@ async function routeMessage(
       grounded: true,
       resolvedUserText: text,
     };
+  }
+
+  // A bare local-office mention ("how do I run for mayor?") with no place
+  // named anywhere in this message OR the recent conversation is genuinely
+  // ambiguous -- there are thousands of mayors. A prompt instruction alone
+  // wasn't reliably followed here in testing (the model would answer with a
+  // generic national overview instead of asking), so this is enforced the
+  // same deterministic way as the state-bill-number check above.
+  if (politicalIntents.has("local_government") && !hasLocalPlaceHint(text)) {
+    const recentConversationText = messagesSnapshot
+      .slice(-6)
+      .map((m) => m.content)
+      .join(" ");
+    if (!hasLocalPlaceHint(recentConversationText)) {
+      return {
+        category: "local_government",
+        label: POLITICAL_CATEGORY_LABELS.local_government,
+        liveDataParts,
+        skipModel: true,
+        skipModelMessage: LOCAL_JURISDICTION_CLARIFICATION_MESSAGE,
+        grounded: true,
+        resolvedUserText: text,
+      };
+    }
   }
 
   const wantsDeepResearch = deepResearchEnabled || politicalIntents.has("deep_research");

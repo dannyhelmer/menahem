@@ -37,3 +37,19 @@ export function detectState(text: string): string | null {
 // avoids everywhere else. Matches today's actual two-jurisdiction capability
 // (see lib/jurisdictions/options.ts) -- not a promise of all 50 states.
 export const JURISDICTION_CLARIFICATION_MESSAGE = "Which jurisdiction do you mean? Illinois or Federal?";
+
+export const LOCAL_JURISDICTION_CLARIFICATION_MESSAGE = "Which city or municipality do you mean?";
+
+// A bare local-office mention ("mayor," "city council") with no place named
+// is genuinely ambiguous -- there are thousands of mayors. Relying on the
+// model to reliably ask a clarifying question here (rather than answering
+// generically) turned out not to be reliable in practice, even with an
+// explicit prompt instruction -- this is the same deterministic-gate
+// pattern already used for a bare state bill number, applied here instead
+// of trusting instruction-following alone.
+const PLACE_BEFORE_OFFICE_RE = /\b[A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?\s+(?:mayor|city council)\b/;
+const PLACE_AFTER_OFFICE_RE = /\b(?:mayor|city council)(?:\s+(?:race|election|seat))?\s+(?:of|in|for)\s+[A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?\b/i;
+
+export function hasLocalPlaceHint(text: string): boolean {
+  return Boolean(detectState(text)) || PLACE_BEFORE_OFFICE_RE.test(text) || PLACE_AFTER_OFFICE_RE.test(text);
+}
