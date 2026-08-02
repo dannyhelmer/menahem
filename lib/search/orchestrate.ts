@@ -1,6 +1,7 @@
 import { fetchPageText } from "./fetch";
 import { getConfiguredProviders } from "./registry";
 import type { SearchProvider, SearchResult } from "./types";
+import { sourceAuthorityRank } from "@/lib/research/source-tier";
 
 const MAX_PAGES_TO_FETCH = 8;
 
@@ -58,7 +59,34 @@ export async function runSearchForMessage(
     };
   }
 
-  const candidates = results.slice(0, MAX_PAGES_TO_FETCH);
+  // A "prefer recent" search (Tavily's topic=news, Brave's freshness filter)
+  // restricts to news-shaped content, which can starve a stable factual
+  // lookup ("who is the current president") down to almost nothing -- an
+  // official bio page or reference source isn't "news" and gets excluded
+  // entirely, not just deprioritized. If recency mode returned too little,
+  // fall back to a normal search and merge in whatever it adds.
+  if (options?.preferRecent && results.length < 3) {
+    console.log(`[orchestrate] preferRecent search only returned ${results.length} result(s) -- falling back to a general search too`);
+    try {
+      const generalResults = await usedProvider.search(query, maxResults);
+      const seen = new Set(results.map((r) => r.url));
+      for (const r of generalResults) {
+        if (!seen.has(r.url)) {
+          results.push(r);
+          seen.add(r.url);
+        }
+      }
+    } catch (err) {
+      console.log(`[orchestrate] fallback general search failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Sort by source authority before deciding which pages are actually worth
+  // fetching -- otherwise an official/authoritative source that happened to
+  // rank lower in raw provider relevance never gets a chance at all once
+  // the list is sliced down to MAX_PAGES_TO_FETCH.
+  const ranked = [...results].sort((a, b) => sourceAuthorityRank(b.url) - sourceAuthorityRank(a.url));
+  const candidates = ranked.slice(0, MAX_PAGES_TO_FETCH);
   const fetched: { title: string; url: string; text: string }[] = [];
   for (const candidate of candidates) {
     const { text, error } = await fetchPageText(candidate.url);

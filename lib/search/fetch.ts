@@ -84,6 +84,17 @@ export async function fetchPageText(url: string, maxChars = MAX_EXTRACTED_CHARS)
 
   if (!text) return { text: null, error: "Page loaded but no readable text content was found (may be JS-rendered)." };
 
+  // Bot-challenge/interstitial pages (Cloudflare, etc.) return HTTP 200 with
+  // real HTML, so the checks above don't catch them -- but the "content" is
+  // a JS-challenge placeholder, not the actual article, and feeding that to
+  // the model as if it were real page content produces confidently wrong
+  // answers sourced to a page that never actually said what's claimed. A
+  // short extraction combined with a telltale phrase is a reliable signal.
+  const BOT_CHALLENGE_RE = /just a moment|checking your browser|enable javascript and cookies|verify you are human|attention required/i;
+  if (text.length < 200 && BOT_CHALLENGE_RE.test(text)) {
+    return { text: null, error: "Page returned a bot-challenge/interstitial page instead of real content." };
+  }
+
   if (text.length > maxChars) {
     const truncated = text.slice(0, maxChars);
     const lastSpace = truncated.lastIndexOf(" ");
