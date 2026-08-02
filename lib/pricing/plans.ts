@@ -62,7 +62,6 @@ export const PRICING_PLANS: PricingPlan[] = [
     limitations: [
       { text: "Political Workspace projects", excluded: true },
       { text: "Analyze multiple documents together", excluded: true },
-      { text: "Export to PDF and DOCX", excluded: true },
       { text: "Unlimited saved conversations", excluded: true },
     ],
   },
@@ -81,7 +80,6 @@ export const PRICING_PLANS: PricingPlan[] = [
       { text: "2,500 AI messages per month" },
       { text: "Political Workspace projects" },
       { text: "Analyze multiple documents together" },
-      { text: "Export to PDF and DOCX" },
       { text: "Unlimited saved conversations" },
       { text: "Unlimited document uploads" },
     ],
