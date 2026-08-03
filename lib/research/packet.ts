@@ -381,7 +381,13 @@ export async function buildResearchPacket(
   // candidate set at all.
   const isLegislative = LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent));
   const searchQuery = isLegislative ? `${question} official legislature bill text status` : question;
-  const searchResult = await runSearchWithRetry(searchQuery, maxSearchResults, {
+  // A wider raw candidate pool gives sortByAuthority (in orchestrate.ts,
+  // applied before the top MAX_PAGES_TO_FETCH are actually fetched) more to
+  // work with -- the official legislature's page is often organically
+  // outranked by implementation pages and explainers, so if only the
+  // default 10 raw results are requested, it may never be in the candidate
+  // set at all for the authority sort to promote.
+  const searchResult = await runSearchWithRetry(searchQuery, isLegislative ? Math.max(maxSearchResults, 15) : maxSearchResults, {
     preferRecent: detectRecencyNeed(question),
   });
   if (searchResult.success && searchResult.liveData) {
