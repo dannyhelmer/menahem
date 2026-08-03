@@ -5,7 +5,7 @@
 // 4217 and compare it to federal law" matches both state_legislation and
 // federal_legislation) -- callers get the full matched set, not one label.
 import { detectHistoricalVerificationNeed } from "./web-search-intent";
-import { LOCAL_LEVEL_RE } from "./jurisdiction";
+import { detectState, LOCAL_LEVEL_RE } from "./jurisdiction";
 import { LEARNING_MODE_RE } from "./learning-mode";
 
 export type PoliticalIntent =
@@ -33,6 +33,17 @@ const STATE_BILL_RE = /\b(?:[hs]\.?\s?b\.?\s?\d+|house bill \d+|senate bill \d+)
 
 const FEDERAL_LEGISLATION_RE = /\bfederal (law|legislation|bill|statute)\b|\bact of congress\b|\bcongress passed\b/i;
 const STATE_LEGISLATION_RE = /\bstate (law|legislation|bill|statute)\b|\bstate legislature\b/i;
+
+// Catches a specific law referenced by its common capitalized name (e.g.
+// "the Live Local Act", "the Inflation Reduction Act", "the Affordable Care
+// Act") -- a huge share of real questions name a law this way rather than
+// citing a bill number or using the literal phrase "state law"/"federal
+// law". Without this, such a question falls through to the generic
+// web-search path and skips the whole legislative-response pipeline
+// (structured header, source hierarchy, Verification, Research Confidence,
+// gov-data-provider retrieval) entirely, even though it's squarely a
+// legislation question.
+const NAMED_ACT_RE = /\b(?:[A-Z][a-zA-Z'.]*\s+){1,6}Act\b/;
 const ELECTIONS_RE = /\belections?\b|\brunning for\b|\bcandidates?\b|\bballots?\b|\bprimary election\b|\bpolling\b|\bvoters?\b/i;
 const CAMPAIGN_FINANCE_RE =
   /\b(campaign finance|campaign contribution\w*|donor\w*|donat\w*|cash on hand|money raised|total raised|fundrais\w*|pac (money|contribution\w*|donation\w*|support)|independent expenditure\w*|who('?s| is) funding|financial disclosure\w*)\b/i;
@@ -59,9 +70,12 @@ export function classifyPoliticalIntents(text: string): Set<PoliticalIntent> {
     if (condition) intents.add(intent);
   };
 
-  add(POLITICAL_RE.test(text), "political");
-  add(FEDERAL_BILL_RE.test(text) || FEDERAL_LEGISLATION_RE.test(text), "federal_legislation");
-  add(STATE_BILL_RE.test(text) || STATE_LEGISLATION_RE.test(text), "state_legislation");
+  const namedAct = NAMED_ACT_RE.test(text);
+  const namedState = detectState(text);
+
+  add(POLITICAL_RE.test(text) || namedAct, "political");
+  add(FEDERAL_BILL_RE.test(text) || FEDERAL_LEGISLATION_RE.test(text) || (namedAct && !namedState), "federal_legislation");
+  add(STATE_BILL_RE.test(text) || STATE_LEGISLATION_RE.test(text) || (namedAct && Boolean(namedState)), "state_legislation");
   add(ELECTIONS_RE.test(text), "elections");
   add(CAMPAIGN_FINANCE_RE.test(text), "campaign_finance");
   add(SUPREME_COURT_RE.test(text), "supreme_court");

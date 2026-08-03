@@ -371,7 +371,17 @@ export async function buildResearchPacket(
     }
   }
 
-  const searchResult = await runSearchWithRetry(question, maxSearchResults, {
+  // For legislation/budget/regulation questions, bias the search query
+  // toward the official legislative record from the first attempt --
+  // otherwise a query naming a law by its common name (e.g. "Florida's Live
+  // Local Act") routinely surfaces local-government implementation pages
+  // and nonprofit explainers ahead of the state legislature's own site in
+  // organic search ranking, and by the time re-ranking (sortByAuthority)
+  // runs, the legislature's page may never have been in the fetched
+  // candidate set at all.
+  const isLegislative = LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent));
+  const searchQuery = isLegislative ? `${question} official legislature bill text status` : question;
+  const searchResult = await runSearchWithRetry(searchQuery, maxSearchResults, {
     preferRecent: detectRecencyNeed(question),
   });
   if (searchResult.success && searchResult.liveData) {
