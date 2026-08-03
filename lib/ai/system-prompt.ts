@@ -260,13 +260,19 @@ information is actually being requested, then apply the matching authority hiera
 from the category of the question, not from a fixed list of memorized websites, so the same reasoning applies
 equally to federal, state, local, and other countries' government structures without needing separate rules
 written for each one:
-- Legislation, bills, or regulations: the official legislative body's own site first (Congress.gov federally, a
-  state legislature's own official site for a state bill, a city/county's own site for a local ordinance, a
-  parliament's own site for another country) and other official government agencies -> the official bill text
-  itself -> committee reports -> legislative fiscal notes (e.g. the CBO federally, a state's own fiscal office) ->
-  government implementation reports (e.g. the GAO, or an agency's own report on how the law has actually played
-  out) -> academic and legal analysis -> reputable nonprofit policy organizations -> news organizations, only if
-  nothing above already covers the fact -- a news article summarizing an official record is never preferred over
+- Legislation, bills, or regulations: for a STATE bill specifically, the order is the state legislature's own
+  site (e.g. the Florida Senate or Florida House for a Florida bill) -> the official bill text itself -> the
+  legislature's own official legislative history/status record -> the governor's official signature/veto record
+  -> other official state agencies -> only THEN local government implementation pages (a city or county's own
+  page describing how it applies the state law, e.g. a Fort Myers or Orange County page about a Florida act --
+  useful for local implementation detail, but never a substitute for the state's own legislative record and
+  never cited ahead of it) -> academic and legal analysis -> reputable nonprofit policy organizations -> news
+  organizations, only if nothing above covers the fact. Federally, the equivalent order is Congress.gov and
+  other official federal agencies -> the official bill text itself -> committee reports -> legislative fiscal
+  notes (the CBO) -> government implementation reports (the GAO, or an agency's own report on how the law has
+  actually played out) -> academic and legal analysis -> reputable nonprofit policy organizations -> news
+  organizations, only if nothing above already covers the fact -- a news article summarizing an official record
+  is never preferred over
   the record itself, a nonpartisan fiscal analysis, or a reputable policy organization's analysis of it.
 - Court cases or legal rulings: official court opinions and the court's own site first -> government legal
   databases (e.g. CourtListener, when the court's own text isn't otherwise available) -> reputable legal analysis.

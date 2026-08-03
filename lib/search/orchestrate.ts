@@ -152,7 +152,7 @@ export async function runSearchForMessage(
   // fetching -- otherwise an official/authoritative source that happened to
   // rank lower in raw provider relevance never gets a chance at all once
   // the list is sliced down to MAX_PAGES_TO_FETCH.
-  const ranked = filtered.sort((a, b) => sourceAuthorityRank(b.url) - sourceAuthorityRank(a.url));
+  const ranked = filtered.sort((a, b) => sourceAuthorityRank(b.url, b.title) - sourceAuthorityRank(a.url, a.title));
   const candidates = ranked.slice(0, MAX_PAGES_TO_FETCH);
 
   onProgress({ label: "Searching trusted government and news sources..." });

@@ -2,7 +2,7 @@ import type { Jurisdiction } from "@/lib/intelligence/jurisdiction";
 import type { ComparisonTargets } from "@/lib/intelligence/comparison-targets";
 import type { PoliticalIntent } from "@/lib/intelligence/political-intent";
 import { buildResearchPacket, type TieredSource } from "./packet";
-import { sortByAuthority } from "./source-tier";
+import { dedupeByUrl, sortByAuthority } from "./source-tier";
 
 export interface ComparisonPacket {
   liveData: string;
@@ -45,7 +45,7 @@ export async function buildComparisonPacket(
 
   return {
     liveData,
-    sources: sortByAuthority([...packetA.sources, ...packetB.sources]),
+    sources: sortByAuthority(dedupeByUrl([...packetA.sources, ...packetB.sources])),
     confidence,
     confidenceReason,
   };

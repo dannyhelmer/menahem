@@ -59,7 +59,7 @@ export function sourceTier(url: string): SourceTier {
   if (NEWS_DOMAINS.has(bareHost)) return "news";
   if (REFERENCE_DOMAINS.has(bareHost)) return "reference";
   if (isWikipedia(url)) return "reference";
-  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return "government";
+  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil") || bareHost.endsWith(".us")) return "government";
   if (bareHost.endsWith(".edu")) return "reference";
   return "general";
 }
@@ -71,6 +71,26 @@ export function sourceTierScore(url: string): number {
 // Legal-database/analysis domains -- ranked with academic sources (below
 // official government sources, above nonprofit policy orgs and all news).
 const LEGAL_ANALYSIS_DOMAINS = new Set(["courtlistener.com"]);
+
+// Within the generic government-domain bucket, distinguishes STATE-level
+// official bodies (legislature, governor, state statutes/agencies) from
+// LOCAL city/county implementation pages -- both are legitimate official
+// government sources, but a city's page describing how it applies a state
+// law (e.g. a Fort Myers or Orange County page about Florida's Live Local
+// Act) is never a substitute for the state legislature's own record, and
+// must rank below it even though both are technically ".gov". Matched
+// against the source's title (not the URL, since municipal domain naming
+// has no consistent pattern across jurisdictions) -- state hint checked
+// first so a page titled e.g. "Florida Department of Revenue: County Tax
+// Guidance" is correctly read as a state agency, not a county page.
+const STATE_LEVEL_GOV_HINT_RE =
+  /\b(state )?senate\b|\bhouse of representatives\b|\bstate legislature\b|\bgeneral assembly\b|\blegislature\b|\bstatutes?\b|\bgovernor'?s?( office)?\b|\brevised code\b|\badministrative code\b|\bdepartment of\b|\bstate agency\b/i;
+const LOCAL_GOV_HINT_RE =
+  /\bcity of\b|\btown of\b|\bvillage of\b|\btownship of\b|\bborough of\b|\bparish of\b|\bcity council\b|\bcounty commission\w*\b|\bcounty government\b|\bmunicipal\w*\b|\bcounty\b/i;
+
+function isLocalImplementationSource(title: string): boolean {
+  return LOCAL_GOV_HINT_RE.test(title) && !STATE_LEVEL_GOV_HINT_RE.test(title);
+}
 
 // Finer-grained authority ranking than SourceTier -- reflects how a real
 // policy researcher would actually trust these sources relative to each
@@ -98,17 +118,20 @@ const AUTHORITY_RULES: [(host: string) => boolean, number][] = [
   [(h) => h === "gao.gov", 85], // government implementation reports
 ];
 
-export function sourceAuthorityRank(url: string): number {
+export function sourceAuthorityRank(url: string, title = ""): number {
   const bareHost = bareHostOf(url);
   if (bareHost === null) return 0;
 
   for (const [test, rank] of AUTHORITY_RULES) {
     if (test(bareHost)) return rank;
   }
-  // Any other official government agency (state legislature sites, agency
-  // implementation reports, etc.) -- still outranks every non-government
-  // source category below.
-  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return 80;
+  // Any other official government domain (state legislature/governor/agency
+  // sites, or a city/county implementation page) -- ".us" is included
+  // alongside ".gov"/".mil" since several states run their official
+  // legislative sites on a "state.XX.us" pattern rather than ".gov".
+  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil") || bareHost.endsWith(".us")) {
+    return isLocalImplementationSource(title) ? 68 : 80; // local implementation page vs. state/other official government
+  }
   if (bareHost.endsWith(".edu") || LEGAL_ANALYSIS_DOMAINS.has(bareHost)) return 65; // academic/legal analysis
   if (REFERENCE_DOMAINS.has(bareHost)) return 55; // reputable nonprofit policy organizations
   if (WIRE_SERVICE_DOMAINS.has(bareHost)) return 45; // news -- only if necessary
@@ -118,6 +141,22 @@ export function sourceAuthorityRank(url: string): number {
   return 10;
 }
 
-export function sortByAuthority<T extends { url: string }>(items: T[]): T[] {
-  return [...items].sort((a, b) => sourceAuthorityRank(b.url) - sourceAuthorityRank(a.url));
+// Shared de-duplication for any place multiple retrieval sets get merged
+// (a gov-data provider and a web search both landing on the same page, or
+// two comparison subjects citing the same source) -- keeps the first
+// occurrence, so callers that push higher-confidence sources first (e.g.
+// gov-data-provider results before web-search results) keep that one.
+export function dedupeByUrl<T extends { url: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.url)) return false;
+    seen.add(item.url);
+    return true;
+  });
+}
+
+export function sortByAuthority<T extends { url: string; title?: string }>(items: T[]): T[] {
+  return [...items].sort(
+    (a, b) => sourceAuthorityRank(b.url, b.title ?? "") - sourceAuthorityRank(a.url, a.title ?? ""),
+  );
 }

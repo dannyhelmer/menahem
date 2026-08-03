@@ -6,7 +6,7 @@ import { getConnectedEntities } from "@/lib/graph/store";
 import { getTimeline } from "@/lib/timeline/store";
 import { runSearchWithRetry } from "@/lib/search/orchestrate";
 import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
-import { sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
+import { dedupeByUrl, sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
 
 const LEGISLATIVE_SUMMARY_INTENTS: PoliticalIntent[] = [
   "federal_legislation",
@@ -122,10 +122,23 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "this -- name that report), PRELIMINARY evidence (early, incomplete, or non-official data exists and is " +
   "explicitly caveated as preliminary, e.g. \"early state-level enrollment data suggests..., though this is " +
   "preliminary and covers only partial implementation\"), or UNKNOWN/INSUFFICIENT evidence (nothing retrieved " +
-  "actually measures this yet -- say so plainly: \"No official implementation report was identified measuring " +
-  "this outcome yet.\"). Never write as though an outcome has been observed when only a projection or a bare " +
-  "expectation exists -- a projection stays a projection, however long ago the bill passed, until an official " +
-  "source actually reports the measured result.\n\n" +
+  "actually measures this yet -- say so plainly, using exactly this phrase: \"Long-term implementation data is " +
+  "currently limited.\"). Never write an estimate or an effectiveness claim about a measurable outcome unless a " +
+  "specific source is cited for it -- if no source supports the number or claim, use the sentence above instead " +
+  "of stating or implying a result that hasn't actually been measured. Never write as though an outcome has " +
+  "been observed when only a projection or a bare expectation exists -- a projection stays a projection, " +
+  "however long ago the bill passed, until an official source actually reports the measured result.\n\n" +
+  "Throughout the response, keep three source categories visibly distinct and never blend them into one " +
+  "undifferentiated voice: OFFICIAL LEGISLATIVE SOURCES (the bill text, the legislature's own site, committee " +
+  "reports, floor votes, the Congressional Record or a state equivalent -- what the law actually says and what " +
+  "the legislative record actually documents), GOVERNMENT IMPLEMENTATION GUIDANCE (an executive agency's or " +
+  "local government's own material on how the law is being applied or administered -- distinct from what the " +
+  "law itself says), and INDEPENDENT ANALYSIS (academic research, nonprofit policy organizations, or news " +
+  "coverage characterizing or evaluating the law). Make which category a given claim comes from clear from its " +
+  "attribution (name the legislature, the agency, or the analyzing organization) rather than presenting all " +
+  "three in the same unattributed tone. When an official legislature page is present anywhere in the retrieved " +
+  "sources, cite it directly at least once in the response -- never let the response rely entirely on " +
+  "implementation pages, analysis, or news coverage while leaving the legislature's own record uncited.\n\n" +
   "Avoid language that implies a policy choice was objectively necessary or self-evidently correct -- that's a " +
   "value judgment dressed as fact. Instead of \"The emphasis on rural healthcare was necessary,\" write " +
   "something like \"The legislation added incentives for rural healthcare. Supporters argued this would improve " +
@@ -390,20 +403,28 @@ export async function buildResearchPacket(
       "somewhere near the claim it supports, it will not be shown to the user as a source for this response, so " +
       "silently relying on a source without naming it defeats the purpose of citing at all.",
     "When multiple sources corroborate the same fact, prefer citing the most authoritative one available, in " +
-      "this order: (1) official legislature websites (Congress.gov federally, the state legislature's own site " +
-      "for a state bill, city/county council sites for local ordinances) and official government agencies " +
-      "(WhiteHouse.gov, Supreme Court opinions, any other .gov site); (2) official bill text itself; " +
-      "(3) committee reports; (4) legislative fiscal notes (the Congressional Budget Office, a state's fiscal " +
-      "office); (5) government implementation reports (the Government Accountability Office, an agency's own " +
-      "report on how a law has actually been carried out); (6) academic and legal analysis (peer-reviewed " +
-      "research, court-opinion databases); (7) reputable nonprofit policy organizations; (8) news organizations " +
-      "-- ONLY when nothing in categories 1-7 covers the fact, since a news article's summary of an official " +
-      "record is never preferred over the record itself or a nonpartisan analysis of it. Wikipedia is " +
-      "background/supporting context only, below all of the above. Never let a lower-authority source outrank " +
-      "a higher one that says the same thing -- a city government page or a nonprofit's policy brief should " +
-      "never be cited ahead of the official legislature's own record when both are available. Do not let an " +
-      "advocacy organization become the primary source for a fact when an official legislative source for that " +
-      "same fact exists in the retrieved data, even if the advocacy source is more detailed or easier to quote.",
+      "this order: (1) the official legislature's own site (Congress.gov federally, the state legislature's own " +
+      "site for a state bill -- e.g. the Florida Senate or Florida House for a Florida bill -- a city/county " +
+      "council site for a local ordinance); (2) the official bill text itself; (3) the official legislative " +
+      "history/status record (committee referrals, actions, votes as recorded by the legislature itself); " +
+      "(4) official executive action on the bill (a governor's or the President's signature/veto record, e.g. " +
+      "the Governor's Office); (5) other official state or federal agencies (e.g. a state's official statutes " +
+      "site, a department directly named in the bill); (6) legislative fiscal notes (the Congressional Budget " +
+      "Office, a state's fiscal office); (7) government implementation reports (the Government Accountability " +
+      "Office, or -- ranked below every source in categories 1-6 -- a LOCAL government's own page on how it is " +
+      "implementing a state or federal law, e.g. a city or county page about a state act; this kind of page " +
+      "must never replace or outrank the state's own legislative record for facts about the law itself, only " +
+      "supplement it for local implementation detail); (8) academic and legal analysis (peer-reviewed research, " +
+      "court-opinion databases); (9) reputable nonprofit policy organizations; (10) news organizations -- ONLY " +
+      "when nothing in categories 1-9 covers the fact, since a news article's summary of an official record is " +
+      "never preferred over the record itself or a nonpartisan analysis of it. Wikipedia is background/" +
+      "supporting context only, below all of the above. Never let a lower-authority source outrank a higher one " +
+      "that says the same thing -- a city or county implementation page must never replace the state " +
+      "legislature's own record as the source for what a state law actually says or how it moved through the " +
+      "legislature, even when the local page is more detailed, easier to read, or more directly about the " +
+      "user's own city. Do not let an advocacy organization become the primary source for a fact when an " +
+      "official legislative source for that same fact exists in the retrieved data, even if the advocacy source " +
+      "is more detailed or easier to quote.",
   ];
   if (LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent))) {
     instructions.push(LEGISLATIVE_SUMMARY_INSTRUCTIONS);
@@ -426,7 +447,12 @@ export async function buildResearchPacket(
     ...liveDataParts,
   ].join("\n\n---\n\n");
 
-  const sortedSources = sortByAuthority(sources);
+  // De-duplicate by URL before sorting/returning -- gov-data-provider
+  // sources are pushed before web-search sources, so when both surface the
+  // same URL (e.g. a search result landing on the same Congress.gov page a
+  // provider already retrieved), the earlier, "always_keep"-tagged entry is
+  // the one kept.
+  const sortedSources = sortByAuthority(dedupeByUrl(sources));
   return {
     intents: Array.from(intents),
     jurisdiction,
