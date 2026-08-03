@@ -24,7 +24,8 @@ import { buildLearningModeGuidance, detectLearningMode } from "@/lib/intelligenc
 import { classifyPoliticalIntents, isPoliticalQuestion, type PoliticalIntent } from "@/lib/intelligence/political-intent";
 import { requiresLiveData, VERIFICATION_FAILED_MESSAGE } from "@/lib/intelligence/requires-live-data";
 import { CATEGORY_LABELS, classify } from "@/lib/intelligence/task-classifier";
-import { getDocument, getDocumentText } from "@/lib/documents/store";
+import { getDocument, getDocumentPages, getDocumentText } from "@/lib/documents/store";
+import type { DocumentPage, StoredDocument } from "@/lib/documents/types";
 import { getProject } from "@/lib/notebook/store";
 import { getResearchCategory } from "@/lib/research-categories/config";
 import {
@@ -158,35 +159,121 @@ function createFirstTokenWatchdog(baseSignal: AbortSignal, ms: number) {
 
 const MAX_DOCUMENT_CONTEXT_LENGTH = 50_000;
 
-// Phase 15: folds an uploaded document's real, extracted text into liveData
-// -- capped so a long PDF can't crowd out the rest of the context window.
-// Never pretends to have read more than what's actually shown.
-// For large documents (100+ pages), the text is chunked with page markers
-// so citations can reference the correct section, and the model is told
-// the total document length so it knows how much was omitted.
+// Document Intelligence Phase 1: folds an uploaded document's real,
+// per-page (PDF) or per-line (DOCX/TXT/MD -- no real page concept) text
+// into liveData, capped so a long document can't crowd out the rest of the
+// context window. Every locator shown to the model -- a page number or a
+// line number -- is real, taken directly from document_pages; there is no
+// character-count estimation anywhere in this path. A document uploaded
+// before this existed (zero document_pages rows) falls back to the flat
+// legacy text with an explicit instruction to never cite a page or line
+// number for it -- private beta, so it's served as-is rather than
+// backfilled; re-uploading gets it page-aware citations.
 async function buildDocumentContext(documentId: string, userId: string): Promise<string | null> {
-  const [document, text] = await Promise.all([getDocument(documentId, userId), getDocumentText(documentId, userId)]);
-  if (!document || !text) return null;
+  const document = await getDocument(documentId, userId);
+  if (!document) return null;
 
-  const totalLength = text.length;
+  const pages = await getDocumentPages(documentId, userId);
+  if (pages.length === 0) {
+    const text = await getDocumentText(documentId, userId);
+    return text ? buildLegacyDocumentContext(document, text) : null;
+  }
+
+  return document.paginated
+    ? buildPaginatedDocumentContext(document, pages)
+    : buildLineNumberedDocumentContext(document, pages);
+}
+
+function buildLegacyDocumentContext(document: StoredDocument, text: string): string {
+  const truncated = text.length > MAX_DOCUMENT_CONTEXT_LENGTH;
   const excerpt = text.slice(0, MAX_DOCUMENT_CONTEXT_LENGTH);
-  const truncated = excerpt.length < totalLength;
+  return [
+    `Uploaded document "${document.filename}" -- use ONLY this content to answer questions about it. This ` +
+      "document was uploaded before page-level citation support existed, so there is no real page or line " +
+      "data for it -- NEVER cite a page number or line number for it, even if asked; cite only the document's " +
+      "filename. If precise citations matter here, tell the user this specific document needs to be " +
+      "re-uploaded to get them.",
+    truncated
+      ? `Only the first ${excerpt.length.toLocaleString()} of ${text.length.toLocaleString()} characters are ` +
+        "shown below -- say plainly if the answer might be in the omitted portion rather than guessing."
+      : "The complete document is shown below.",
+    excerpt,
+  ].join("\n\n");
+}
 
-  // Insert page markers every ~3000 characters (roughly one page of text)
-  // so the model can reference approximate page locations in citations.
-  // [\s\S] (not a bare `.`) is required -- `.` doesn't match newlines, so
-  // this would never actually fire on real extracted PDF text (which is
-  // full of line breaks), silently disabling page markers entirely.
-  const chunked = excerpt.replace(/([\s\S]{3000})/g, "$1\n[--- page break ---]\n");
+// PDF -- pages[].pageNumber is a real page number extracted from the source
+// file (see app/api/documents/route.ts's extractDocument). Pages are
+// included whole, in order, up to the character budget -- never truncated
+// mid-page, so every page the model sees is complete and its number is
+// trustworthy.
+function buildPaginatedDocumentContext(document: StoredDocument, pages: DocumentPage[]): string {
+  const included: DocumentPage[] = [];
+  let remaining = MAX_DOCUMENT_CONTEXT_LENGTH;
+  for (const page of pages) {
+    if (remaining <= 0 && included.length > 0) break;
+    included.push(page);
+    remaining -= page.text.length;
+  }
+  const truncated = included.length < pages.length;
+  const firstPage = included[0]?.pageNumber ?? 1;
+  const lastPage = included[included.length - 1]?.pageNumber ?? firstPage;
+
+  const body = included.map((page) => `--- Page ${page.pageNumber} ---\n${page.text}`).join("\n\n");
 
   return [
-    `Uploaded document "${document.filename}" -- use ONLY this content to answer questions about it, cite it by ` +
-      "filename, and say plainly if it doesn't contain the answer rather than guessing." +
-      (truncated
-        ? ` This document is ${totalLength.toLocaleString()} characters total; only the first ${excerpt.length.toLocaleString()} characters are shown below. If the user asks about content that might be in the omitted portion, say plainly that you can only see the first portion of the document.`
-        : " The complete document is shown below."),
-    "Page breaks are marked with [--- page break ---] -- use these to reference approximate locations when citing.",
-    chunked,
+    `Uploaded document "${document.filename}" (${pages.length} pages) -- use ONLY this content to answer ` +
+      "questions about it. Every page number below is REAL, extracted directly from the source PDF -- when " +
+      "you cite a page, cite exactly the number shown in its \"--- Page N ---\" marker. NEVER invent, " +
+      "estimate, or guess a page number from memory or by counting characters -- only ever cite a page number " +
+      "you can actually see marked below. If a citation can't be tied to a specific marked page, don't state " +
+      "one.",
+    truncated
+      ? `You can see pages ${firstPage}-${lastPage} of ${pages.length} total. If the user asks about content ` +
+        `that might be on a page outside pages ${firstPage}-${lastPage}, say plainly that you can only see ` +
+        "that range of this document rather than guessing at what a later page might say."
+      : `The complete document (all ${pages.length} pages) is shown below.`,
+    body,
+  ].join("\n\n");
+}
+
+// DOCX/TXT/MD -- no real page concept (pagination is a property of how a
+// word processor renders a file, not something stored in it; plain text
+// has no pages at all), so pages here is always exactly one entry holding
+// the whole document (see extractDocument's paginated: false branch). Line
+// numbers are computed here, not stored, but the same principle as PDF
+// page numbers applies: only ever show the model a real, checkable
+// locator, never one it has to estimate.
+function buildLineNumberedDocumentContext(document: StoredDocument, pages: DocumentPage[]): string {
+  const fullText = pages[0]?.text ?? "";
+  const lines = fullText.split("\n");
+  const totalLines = lines.length;
+
+  let includedLineCount = 0;
+  let charCount = 0;
+  for (const line of lines) {
+    if (charCount > MAX_DOCUMENT_CONTEXT_LENGTH && includedLineCount > 0) break;
+    charCount += line.length + 1;
+    includedLineCount += 1;
+  }
+  const truncated = includedLineCount < totalLines;
+
+  const numbered = lines
+    .slice(0, includedLineCount)
+    .map((line, index) => `${index + 1}: ${line}`)
+    .join("\n");
+
+  return [
+    `Uploaded document "${document.filename}" (${totalLines} lines) -- use ONLY this content to answer ` +
+      "questions about it. This format has no real page numbers (DOCX/TXT/Markdown files aren't paginated) -- " +
+      "NEVER cite a page number for it, even if asked. Instead cite the document's filename and, where a " +
+      "specific passage matters, the real line number(s) shown at the start of each line below (e.g. \"lines " +
+      "42-45\") -- never invent or estimate a line number that isn't actually shown.",
+    truncated
+      ? `You can see lines 1-${includedLineCount} of ${totalLines} total. If the user asks about content that ` +
+        "might be further into the document, say plainly that you can only see the first portion rather than " +
+        "guessing."
+      : `The complete document (all ${totalLines} lines) is shown below.`,
+    numbered,
   ].join("\n\n");
 }
 

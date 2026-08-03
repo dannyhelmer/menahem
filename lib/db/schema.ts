@@ -107,6 +107,29 @@ async function runMigrations(): Promise<void> {
   await sql`ALTER TABLE documents ALTER COLUMN project_id DROP NOT NULL`;
   await sql`CREATE INDEX IF NOT EXISTS documents_project_id_idx ON documents(project_id)`;
 
+  // Document intelligence Phase 1: real per-page storage instead of a single
+  // flattened string. `paginated` records whether page_number below is a
+  // REAL page (true, PDF only -- DOCX/TXT/MD have no page concept, so this
+  // is false and citations for those must reference the document/line
+  // range instead, never a fabricated page number). Defaults to false for
+  // every row that predates this column -- correct, since none of them
+  // have real page data either. A document uploaded before this migration
+  // has zero document_pages rows; it's served from the legacy `text_content`
+  // column with no page citations rather than backfilled (private beta --
+  // users can just re-upload for page-aware citations).
+  await sql`ALTER TABLE documents ADD COLUMN IF NOT EXISTS paginated boolean NOT NULL DEFAULT false`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS document_pages (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      page_number int NOT NULL,
+      text_content text NOT NULL,
+      UNIQUE (document_id, page_number)
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS document_pages_document_id_idx ON document_pages(document_id)`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS app_settings (
       key text PRIMARY KEY,

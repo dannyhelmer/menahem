@@ -5,6 +5,7 @@ import "@/lib/documents/pdf-polyfills";
 import { PDFParse } from "pdf-parse";
 import { generateDocumentSummary } from "@/lib/documents/summarize";
 import { listDocuments, saveDocument } from "@/lib/documents/store";
+import type { DocumentPage } from "@/lib/documents/types";
 import { withAuth } from "@/lib/auth/with-auth";
 import { checkUploadLimit, checkFileSize } from "@/lib/subscription/guards";
 import { incrementUploadCount, recordUploadEvent } from "@/lib/subscription/store";
@@ -25,13 +26,29 @@ PDFParse.setWorker(
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
-async function extractText(file: File, buffer: Buffer): Promise<string> {
+interface ExtractedDocument {
+  pages: DocumentPage[];
+  // True only for PDF -- pages[].pageNumber is a REAL page number in that
+  // case (pdf-parse's getText() already computes per-page text internally;
+  // this reads that instead of only the flattened whole-document string it
+  // also returns). DOCX/TXT/MD have no real page concept, so they come back
+  // as a single page (pageNumber 1) and `paginated: false` -- callers must
+  // never present a page-number citation for those, only a document/line
+  // reference.
+  paginated: boolean;
+}
+
+async function extractDocument(file: File, buffer: Buffer): Promise<ExtractedDocument> {
   const name = file.name.toLowerCase();
 
   if (file.type === "application/pdf" || name.endsWith(".pdf")) {
     const parser = new PDFParse({ data: buffer });
     try {
-      return (await parser.getText()).text;
+      const result = await parser.getText();
+      return {
+        paginated: true,
+        pages: result.pages.map((page) => ({ pageNumber: page.num, text: page.text })),
+      };
     } finally {
       await parser.destroy();
     }
@@ -42,11 +59,11 @@ async function extractText(file: File, buffer: Buffer): Promise<string> {
     name.endsWith(".docx")
   ) {
     const { value } = await mammoth.extractRawText({ buffer });
-    return value;
+    return { paginated: false, pages: [{ pageNumber: 1, text: value }] };
   }
 
   if (name.endsWith(".txt") || name.endsWith(".md") || file.type === "text/plain" || file.type === "text/markdown") {
-    return buffer.toString("utf-8");
+    return { paginated: false, pages: [{ pageNumber: 1, text: buffer.toString("utf-8") }] };
   }
 
   throw new Error("Unsupported file type. Menahem accepts PDF, DOCX, TXT, and Markdown files.");
@@ -109,9 +126,9 @@ export const POST = withAuth(async (request: Request, _ctx, user) => {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  let text: string;
+  let extracted: ExtractedDocument;
   try {
-    text = await extractText(file, buffer);
+    extracted = await extractDocument(file, buffer);
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? `Couldn't read that file: ${err.message}` : "Couldn't read that file." },
@@ -119,12 +136,19 @@ export const POST = withAuth(async (request: Request, _ctx, user) => {
     );
   }
 
-  if (!text.trim()) {
+  if (extracted.pages.every((page) => !page.text.trim())) {
     return Response.json({ error: "That file doesn't appear to contain any readable text." }, { status: 400 });
   }
 
-  const summary = await generateDocumentSummary(text, user.id);
-  const document = await saveDocument(user.id, { projectId, filename: file.name, summary }, buffer, text);
+  const fullText = extracted.pages.map((page) => page.text).join("\n\n");
+  const summary = await generateDocumentSummary(fullText, user.id);
+  const document = await saveDocument(
+    user.id,
+    { projectId, filename: file.name, summary },
+    buffer,
+    extracted.pages,
+    extracted.paginated,
+  );
 
   // Record the upload event and increment the counter
   await recordUploadEvent(user.id, document.id, file.name, file.size);
