@@ -27,6 +27,7 @@ import { CATEGORY_LABELS, classify } from "@/lib/intelligence/task-classifier";
 import { getDocument, getDocumentPages, getDocumentText } from "@/lib/documents/store";
 import type { DocumentPage, StoredDocument } from "@/lib/documents/types";
 import { retrieveRelevantChunks, type RetrievalResult, type RetrievedChunk } from "@/lib/documents/retrieval";
+import { verifyDocumentCitations, type DocumentCitationContext } from "@/lib/documents/citation-verification";
 import { getProject } from "@/lib/notebook/store";
 import { getResearchCategory } from "@/lib/research-categories/config";
 import {
@@ -174,14 +175,31 @@ const MAX_DOCUMENT_CONTEXT_LENGTH = 50_000;
 // text with an explicit instruction to never cite a page or line number
 // for it -- private beta, so it's served as-is rather than backfilled;
 // re-uploading gets it page-aware citations and retrieval both.
-async function buildDocumentContext(documentId: string, userId: string, query: string): Promise<string | null> {
+// Document Intelligence Phase 3: alongside the liveData text, every builder
+// below also returns exactly which pages/line-ranges it actually showed
+// the model -- the ground truth that verifyDocumentCitations checks the
+// model's response against after generation (see the citation-verification
+// call in the main POST handler). Null when there's nothing mechanically
+// checkable (no document, or a legacy document with no real page/line data
+// at all -- buildLegacyDocumentContext already instructs the model never
+// to cite a locator for those).
+interface DocumentContextResult {
+  text: string;
+  citationCheck: DocumentCitationContext | null;
+}
+
+async function buildDocumentContext(
+  documentId: string,
+  userId: string,
+  query: string,
+): Promise<DocumentContextResult | null> {
   const document = await getDocument(documentId, userId);
   if (!document) return null;
 
   const pages = await getDocumentPages(documentId, userId);
   if (pages.length === 0) {
     const text = await getDocumentText(documentId, userId);
-    return text ? buildLegacyDocumentContext(document, text) : null;
+    return text ? { text: buildLegacyDocumentContext(document, text), citationCheck: null } : null;
   }
 
   const totalLength = pages.reduce((sum, page) => sum + page.text.length, 0);
@@ -201,13 +219,24 @@ async function buildDocumentContext(documentId: string, userId: string, query: s
 // chunkDocument at upload time, which only ever splits along Phase 1's
 // real page/line boundaries -- so it's exactly as trustworthy as the
 // whole-document path's locators, just narrower in scope.
-function buildRetrievedDocumentContext(document: StoredDocument, result: RetrievalResult): string {
+function buildRetrievedDocumentContext(document: StoredDocument, result: RetrievalResult): DocumentContextResult {
+  const citationCheck: DocumentCitationContext = {
+    filename: document.filename,
+    paginated: document.paginated,
+    shownPages: new Set(result.chunks.map((chunk) => chunk.pageNumber)),
+    shownLineRanges: result.chunks
+      .filter((chunk): chunk is RetrievedChunk & { lineStart: number; lineEnd: number } => chunk.lineStart !== null)
+      .map((chunk) => ({ start: chunk.lineStart, end: chunk.lineEnd })),
+  };
+
   if (result.chunks.length === 0) {
-    return (
-      `Uploaded document "${document.filename}" is too large to load in full, and no relevant passages were ` +
-      "found for this specific question via search. Say plainly that you couldn't find anything relevant to " +
-      "this question in the document -- do not answer from general knowledge as if it came from the document."
-    );
+    return {
+      text:
+        `Uploaded document "${document.filename}" is too large to load in full, and no relevant passages were ` +
+        "found for this specific question via search. Say plainly that you couldn't find anything relevant to " +
+        "this question in the document -- do not answer from general knowledge as if it came from the document.",
+      citationCheck,
+    };
   }
 
   const locatorLabel = (chunk: RetrievedChunk) =>
@@ -228,7 +257,7 @@ function buildRetrievedDocumentContext(document: StoredDocument, result: Retriev
         "that you couldn't find it in the retrieved excerpts rather than guessing; suggest a more specific " +
         "question if the answer might be elsewhere in the document.";
 
-  return [
+  const text = [
     `Uploaded document "${document.filename}" is too large to load in full, so the following excerpts were ` +
       "retrieved specifically for this question. Use ONLY this content to answer -- every locator below " +
       `(${document.paginated ? "page" : "line range"}) is real, taken directly from the source document. NEVER ` +
@@ -236,6 +265,8 @@ function buildRetrievedDocumentContext(document: StoredDocument, result: Retriev
     modeNote,
     body,
   ].join("\n\n");
+
+  return { text, citationCheck };
 }
 
 function buildLegacyDocumentContext(document: StoredDocument, text: string): string {
@@ -260,7 +291,7 @@ function buildLegacyDocumentContext(document: StoredDocument, text: string): str
 // included whole, in order, up to the character budget -- never truncated
 // mid-page, so every page the model sees is complete and its number is
 // trustworthy.
-function buildPaginatedDocumentContext(document: StoredDocument, pages: DocumentPage[]): string {
+function buildPaginatedDocumentContext(document: StoredDocument, pages: DocumentPage[]): DocumentContextResult {
   const included: DocumentPage[] = [];
   let remaining = MAX_DOCUMENT_CONTEXT_LENGTH;
   for (const page of pages) {
@@ -274,7 +305,7 @@ function buildPaginatedDocumentContext(document: StoredDocument, pages: Document
 
   const body = included.map((page) => `--- Page ${page.pageNumber} ---\n${page.text}`).join("\n\n");
 
-  return [
+  const text = [
     `Uploaded document "${document.filename}" (${pages.length} pages) -- use ONLY this content to answer ` +
       "questions about it. Every page number below is REAL, extracted directly from the source PDF -- when " +
       "you cite a page, cite exactly the number shown in its \"--- Page N ---\" marker. NEVER invent, " +
@@ -288,6 +319,16 @@ function buildPaginatedDocumentContext(document: StoredDocument, pages: Document
       : `The complete document (all ${pages.length} pages) is shown below.`,
     body,
   ].join("\n\n");
+
+  return {
+    text,
+    citationCheck: {
+      filename: document.filename,
+      paginated: true,
+      shownPages: new Set(included.map((page) => page.pageNumber)),
+      shownLineRanges: [],
+    },
+  };
 }
 
 // DOCX/TXT/MD -- no real page concept (pagination is a property of how a
@@ -297,7 +338,7 @@ function buildPaginatedDocumentContext(document: StoredDocument, pages: Document
 // numbers are computed here, not stored, but the same principle as PDF
 // page numbers applies: only ever show the model a real, checkable
 // locator, never one it has to estimate.
-function buildLineNumberedDocumentContext(document: StoredDocument, pages: DocumentPage[]): string {
+function buildLineNumberedDocumentContext(document: StoredDocument, pages: DocumentPage[]): DocumentContextResult {
   const fullText = pages[0]?.text ?? "";
   const lines = fullText.split("\n");
   const totalLines = lines.length;
@@ -316,7 +357,7 @@ function buildLineNumberedDocumentContext(document: StoredDocument, pages: Docum
     .map((line, index) => `${index + 1}: ${line}`)
     .join("\n");
 
-  return [
+  const text = [
     `Uploaded document "${document.filename}" (${totalLines} lines) -- use ONLY this content to answer ` +
       "questions about it. This format has no real page numbers (DOCX/TXT/Markdown files aren't paginated) -- " +
       "NEVER cite a page number for it, even if asked. Instead cite the document's filename and, where a " +
@@ -329,6 +370,16 @@ function buildLineNumberedDocumentContext(document: StoredDocument, pages: Docum
       : `The complete document (all ${totalLines} lines) is shown below.`,
     numbered,
   ].join("\n\n");
+
+  return {
+    text,
+    citationCheck: {
+      filename: document.filename,
+      paginated: false,
+      shownPages: new Set(),
+      shownLineRanges: includedLineCount > 0 ? [{ start: 1, end: includedLineCount }] : [],
+    },
+  };
 }
 
 // Deterministic (no LLM call) resolution of a short jurisdiction reply
@@ -393,6 +444,13 @@ interface RouteOutcome {
   // are expanded into a standalone question before the conversation history
   // is removed.
   resolvedUserText: string;
+  // Document Intelligence Phase 3: the real pages/line-ranges actually
+  // shown to the model for the attached document this turn (if any) --
+  // ground truth for verifyDocumentCitations, called after generation in
+  // the main POST handler. Null when no document is attached, or the
+  // attached document has no real page/line data to check against (a
+  // legacy pre-Phase-1 upload).
+  documentCitationCheck?: DocumentCitationContext | null;
 }
 
 const DEEP_RESEARCH_MAX_TOKENS = 12000;
@@ -433,7 +491,7 @@ async function routeMessage(
   // to hand to document retrieval too, so a short follow-up like "what
   // about the transportation section?" retrieves against its expanded form.
   const documentContext = documentId ? await buildDocumentContext(documentId, userId, text) : null;
-  if (documentContext) liveDataParts.push(documentContext);
+  if (documentContext) liveDataParts.push(documentContext.text);
 
   // Political Workspace project context -- a project's description is
   // permanent background for every AI response inside that project, not
@@ -457,6 +515,7 @@ async function routeMessage(
       liveDataParts,
       grounded: false,
       resolvedUserText: text,
+      documentCitationCheck: documentContext?.citationCheck ?? null,
     };
   }
 
@@ -471,6 +530,7 @@ async function routeMessage(
       liveDataParts,
       grounded: false,
       resolvedUserText: text,
+      documentCitationCheck: documentContext?.citationCheck ?? null,
     };
   }
 
@@ -489,6 +549,7 @@ async function routeMessage(
       skipModelMessage: JURISDICTION_CLARIFICATION_MESSAGE,
       grounded: true,
       resolvedUserText: text,
+      documentCitationCheck: documentContext?.citationCheck ?? null,
     };
   }
 
@@ -512,6 +573,7 @@ async function routeMessage(
         skipModelMessage: LOCAL_JURISDICTION_CLARIFICATION_MESSAGE,
         grounded: true,
         resolvedUserText: text,
+        documentCitationCheck: documentContext?.citationCheck ?? null,
       };
     }
   }
@@ -538,6 +600,7 @@ async function routeMessage(
       maxTokens: DEEP_RESEARCH_MAX_TOKENS,
       grounded: true,
       resolvedUserText: text,
+      documentCitationCheck: documentContext?.citationCheck ?? null,
     };
   }
 
@@ -562,6 +625,7 @@ async function routeMessage(
         skipModel: requiresLiveData(text) && packet.confidence === "low",
         grounded: true,
         resolvedUserText: text,
+        documentCitationCheck: documentContext?.citationCheck ?? null,
       };
     }
   }
@@ -606,6 +670,7 @@ async function routeMessage(
       skipModel: !isMultiPart && requiresLiveData(text) && packet.confidence === "low",
       grounded: true,
       resolvedUserText: text,
+      documentCitationCheck: documentContext?.citationCheck ?? null,
     };
   }
 
@@ -717,6 +782,7 @@ async function routeMessage(
     sources,
     grounded: shouldSearch,
     resolvedUserText: text,
+    documentCitationCheck: documentContext?.citationCheck ?? null,
   };
 }
 
@@ -890,6 +956,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
           maxTokens,
           grounded,
           resolvedUserText,
+          documentCitationCheck,
         } = await routeMessage(
           userMessage.content,
           messages,
@@ -1031,6 +1098,32 @@ export const POST = withAuth(async (request, _ctx, user) => {
           );
         }
         assistantText = validatedText;
+
+        // DOCUMENT CITATION VERIFICATION (Phase 3): a page/line number the
+        // model cites for an uploaded document must be one it could
+        // actually have seen this turn -- checked mechanically against
+        // documentCitationCheck's real shown-pages/shown-line-ranges
+        // (built alongside the document context itself, see
+        // buildDocumentContext), never trusted from the model's own
+        // claim. An unverifiable citation gets an honest notice appended,
+        // the same pattern as the evidence-validation pass above, rather
+        // than silently left standing as if it had been confirmed.
+        if (documentCitationCheck) {
+          const citationIssues = verifyDocumentCitations(assistantText, documentCitationCheck);
+          if (citationIssues.length > 0) {
+            console.warn(
+              `[document-citations] unverified citations for "${documentCitationCheck.filename}": ` +
+                citationIssues.map((i) => `${i.type}: ${i.detail}`).join("; "),
+            );
+            const notice =
+              `\n\nNote: this response cited a ${documentCitationCheck.paginated ? "page" : "line"} number for ` +
+              `"${documentCitationCheck.filename}" that could not be mechanically verified against what was ` +
+              "actually retrieved for this question -- treat that specific citation with caution.";
+            if (!assistantText.includes(notice.trim())) {
+              assistantText = assistantText.trimEnd() + notice;
+            }
+          }
+        }
 
         // SOURCE ATTRIBUTION: Sources, Evidence Strength, and inline
         // citations must all reference the same, generation-validated set --
