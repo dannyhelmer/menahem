@@ -29,10 +29,13 @@ function hostnameOf(url: string): string {
 
 // A source counts as referenced if the final response text names it --
 // by URL, by hostname (covers "Congress.gov" being written out even though
-// the retrieved title was "Congress.gov -- H.R. 1"), or by the first clause
-// of its title (covers a page title like "California Legislative Information
-// - SB 100" being shortened in prose to just "California Legislative
-// Information").
+// the retrieved title was "Congress.gov -- H.R. 1"), or by ANY
+// separator-delimited clause of its title, not just the first. A page's
+// title can put the actual site/organization name in any position --
+// "California Legislative Information - SB 100" and "SB 102 - The Florida
+// Senate" are both real, common shapes, and a citation like "(Florida
+// Senate)" must still match the second one, not just a title that happens
+// to lead with the org name.
 export function isSourceReferenced(text: string, source: { title: string; url: string }): boolean {
   const lowerText = text.toLowerCase();
   if (source.url && lowerText.includes(source.url.toLowerCase())) return true;
@@ -40,10 +43,8 @@ export function isSourceReferenced(text: string, source: { title: string; url: s
   const host = hostnameOf(source.url);
   if (host && lowerText.includes(host)) return true;
 
-  const firstClause = (source.title.split(/[-–—|:]/)[0] ?? "").trim();
-  if (firstClause.length >= 4 && lowerText.includes(firstClause.toLowerCase())) return true;
-
-  return false;
+  const clauses = source.title.split(/[-–—|:]/).map((clause) => clause.trim());
+  return clauses.some((clause) => clause.length >= 4 && lowerText.includes(clause.toLowerCase()));
 }
 
 // Filters a retrieval set down to only what the final response actually
