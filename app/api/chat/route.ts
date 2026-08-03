@@ -48,6 +48,7 @@ import { buildComparisonPacket } from "@/lib/research/comparison-packet";
 import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
 import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
+import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
 import { filterUsedSources } from "@/lib/research/source-attribution";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
 
@@ -423,15 +424,27 @@ async function routeMessage(
 
   if (isPoliticalQuestion(politicalIntents)) {
     const { jurisdiction, state } = resolveJurisdictionAndState(text, politicalIntents);
-    const packet = await buildResearchPacket(text, politicalIntents, jurisdiction, state);
+    // A broad question naming several independent topics at once (e.g.
+    // "Illinois housing laws, Illinois housing bills, federal housing
+    // programs, court decisions, housing grants, and policy analysis") gets
+    // decomposed into separate research tasks retrieved independently,
+    // instead of one search blurring several unrelated topics together --
+    // see lib/research/planner.ts. This is NOT the Pro-gated Deep Research
+    // mode (a different, much longer report format); it's available to
+    // every user as a retrieval-quality improvement for ordinary questions.
+    const isMultiPart = detectMultiPartResearchQuestion(text);
+    const packet = isMultiPart
+      ? await buildPlannedResearchPacket(text, politicalIntents, jurisdiction, state, onStage, userId)
+      : await buildResearchPacket(text, politicalIntents, jurisdiction, state);
 
     liveDataParts.push(packet.liveData);
     if (detectCriticism(text)) liveDataParts.push(CRITICISM_GUIDANCE);
     if (detectLearningMode(text)) liveDataParts.push(buildLearningModeGuidance(text));
 
     const primaryIntent = pickPrimaryIntent(politicalIntents);
-    const label =
-      primaryIntent === "state_legislation" && state
+    const label = isMultiPart
+      ? "Researching multiple topics"
+      : primaryIntent === "state_legislation" && state
         ? `Searching ${state} sources`
         : POLITICAL_CATEGORY_LABELS[primaryIntent];
     return {
@@ -442,7 +455,11 @@ async function routeMessage(
       confidence: packet.confidence,
       confidenceReason: packet.confidenceReason,
       followups: buildFollowupSuggestions(politicalIntents),
-      skipModel: requiresLiveData(text) && packet.confidence === "low",
+      // Never skip generation for the multi-part path -- graceful
+      // degradation means writing the sections that DO have evidence even
+      // when the overall/weakest confidence is low, not refusing the whole
+      // response the way a single-topic low-confidence answer would.
+      skipModel: !isMultiPart && requiresLiveData(text) && packet.confidence === "low",
       grounded: true,
       resolvedUserText: text,
     };
