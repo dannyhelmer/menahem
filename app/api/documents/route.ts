@@ -5,7 +5,10 @@ import "@/lib/documents/pdf-polyfills";
 import { PDFParse } from "pdf-parse";
 import { generateDocumentSummary } from "@/lib/documents/summarize";
 import { listDocuments, saveDocument } from "@/lib/documents/store";
+import { chunkDocument } from "@/lib/documents/chunk";
+import { saveDocumentChunks } from "@/lib/documents/chunk-store";
 import type { DocumentPage } from "@/lib/documents/types";
+import { embedTexts } from "@/lib/ai/embeddings";
 import { withAuth } from "@/lib/auth/with-auth";
 import { checkUploadLimit, checkFileSize } from "@/lib/subscription/guards";
 import { incrementUploadCount, recordUploadEvent } from "@/lib/subscription/store";
@@ -149,6 +152,18 @@ export const POST = withAuth(async (request: Request, _ctx, user) => {
     extracted.pages,
     extracted.paginated,
   );
+
+  // Document Intelligence Phase 2: chunk + embed for retrieval. Every
+  // chunk's locator (page number, or line range for non-paginated formats)
+  // comes straight from chunkDocument, which only ever splits along
+  // Phase 1's real page/line boundaries -- never invents one. Embeddings
+  // are best-effort (embedTexts returns null entries if OPENAI_API_KEY
+  // isn't configured or the request fails) -- exact/full-text search over
+  // these same chunks works either way, so a failed or skipped embedding
+  // call is never a reason to fail the upload itself.
+  const chunks = chunkDocument(extracted.pages, extracted.paginated);
+  const embeddings = await embedTexts(chunks.map((chunk) => chunk.text));
+  await saveDocumentChunks(document.id, chunks, embeddings);
 
   // Record the upload event and increment the counter
   await recordUploadEvent(user.id, document.id, file.name, file.size);

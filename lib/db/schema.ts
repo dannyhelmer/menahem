@@ -130,6 +130,40 @@ async function runMigrations(): Promise<void> {
   `;
   await sql`CREATE INDEX IF NOT EXISTS document_pages_document_id_idx ON document_pages(document_id)`;
 
+  // Document intelligence Phase 2: chunked, indexed retrieval instead of
+  // loading a whole document into every prompt. Each chunk always carries
+  // its real locator (page_number from document_pages, plus line_start/
+  // line_end for non-paginated formats -- see lib/documents/chunk.ts) so a
+  // retrieved chunk's citation is exactly as grounded as Phase 1's
+  // whole-page citations were. `embedding` is nullable: a deployment
+  // without OPENAI_API_KEY configured still gets full-text (exact) search
+  // over these same chunks, just not semantic search -- never a reason to
+  // fail an upload.
+  await sql`CREATE EXTENSION IF NOT EXISTS vector`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS document_chunks (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      page_number int NOT NULL,
+      line_start int,
+      line_end int,
+      chunk_index int NOT NULL,
+      text_content text NOT NULL,
+      embedding vector(1536),
+      UNIQUE (document_id, page_number, chunk_index)
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS document_chunks_document_id_idx ON document_chunks(document_id)`;
+  // GIN index over to_tsvector for exact/full-text search ("every mention
+  // of X"). No vector similarity index (ivfflat/hnsw) yet -- those need a
+  // reasonable row count to tune well (list count, etc.), and private-beta
+  // chunk volume is low enough that a sequential scan over `embedding` is
+  // fine for now; add one once real usage data exists.
+  await sql`
+    CREATE INDEX IF NOT EXISTS document_chunks_text_search_idx
+    ON document_chunks USING GIN (to_tsvector('english', text_content))
+  `;
+
   await sql`
     CREATE TABLE IF NOT EXISTS app_settings (
       key text PRIMARY KEY,

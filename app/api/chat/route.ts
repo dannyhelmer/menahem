@@ -26,6 +26,7 @@ import { requiresLiveData, VERIFICATION_FAILED_MESSAGE } from "@/lib/intelligenc
 import { CATEGORY_LABELS, classify } from "@/lib/intelligence/task-classifier";
 import { getDocument, getDocumentPages, getDocumentText } from "@/lib/documents/store";
 import type { DocumentPage, StoredDocument } from "@/lib/documents/types";
+import { retrieveRelevantChunks, type RetrievalResult, type RetrievedChunk } from "@/lib/documents/retrieval";
 import { getProject } from "@/lib/notebook/store";
 import { getResearchCategory } from "@/lib/research-categories/config";
 import {
@@ -159,17 +160,21 @@ function createFirstTokenWatchdog(baseSignal: AbortSignal, ms: number) {
 
 const MAX_DOCUMENT_CONTEXT_LENGTH = 50_000;
 
-// Document Intelligence Phase 1: folds an uploaded document's real,
+// Document Intelligence Phase 1/2: folds an uploaded document's real,
 // per-page (PDF) or per-line (DOCX/TXT/MD -- no real page concept) text
-// into liveData, capped so a long document can't crowd out the rest of the
-// context window. Every locator shown to the model -- a page number or a
-// line number -- is real, taken directly from document_pages; there is no
-// character-count estimation anywhere in this path. A document uploaded
-// before this existed (zero document_pages rows) falls back to the flat
-// legacy text with an explicit instruction to never cite a page or line
-// number for it -- private beta, so it's served as-is rather than
-// backfilled; re-uploading gets it page-aware citations.
-async function buildDocumentContext(documentId: string, userId: string): Promise<string | null> {
+// into liveData. Every locator shown to the model -- a page number or a
+// line number -- is real, taken directly from document_pages/document_chunks;
+// there is no character-count estimation anywhere in this path. A document
+// small enough to fit under the budget is shown in full (Phase 1 behavior
+// -- simplest, no retrieval-precision risk). A larger document is too big
+// to load whole, so Phase 2's chunked retrieval finds only the passages
+// relevant to THIS specific question instead of silently truncating from
+// the front the way Phase 1 alone would have. A document uploaded before
+// Phase 1 existed (zero document_pages rows) falls back to the flat legacy
+// text with an explicit instruction to never cite a page or line number
+// for it -- private beta, so it's served as-is rather than backfilled;
+// re-uploading gets it page-aware citations and retrieval both.
+async function buildDocumentContext(documentId: string, userId: string, query: string): Promise<string | null> {
   const document = await getDocument(documentId, userId);
   if (!document) return null;
 
@@ -179,9 +184,58 @@ async function buildDocumentContext(documentId: string, userId: string): Promise
     return text ? buildLegacyDocumentContext(document, text) : null;
   }
 
-  return document.paginated
-    ? buildPaginatedDocumentContext(document, pages)
-    : buildLineNumberedDocumentContext(document, pages);
+  const totalLength = pages.reduce((sum, page) => sum + page.text.length, 0);
+  if (totalLength <= MAX_DOCUMENT_CONTEXT_LENGTH) {
+    return document.paginated
+      ? buildPaginatedDocumentContext(document, pages)
+      : buildLineNumberedDocumentContext(document, pages);
+  }
+
+  const result = await retrieveRelevantChunks(documentId, userId, query);
+  return buildRetrievedDocumentContext(document, result);
+}
+
+// Too large to load in full -- only the chunks retrieval found relevant to
+// this specific question are shown. Each chunk's locator (page number, or
+// line range for a non-paginated document) came straight from
+// chunkDocument at upload time, which only ever splits along Phase 1's
+// real page/line boundaries -- so it's exactly as trustworthy as the
+// whole-document path's locators, just narrower in scope.
+function buildRetrievedDocumentContext(document: StoredDocument, result: RetrievalResult): string {
+  if (result.chunks.length === 0) {
+    return (
+      `Uploaded document "${document.filename}" is too large to load in full, and no relevant passages were ` +
+      "found for this specific question via search. Say plainly that you couldn't find anything relevant to " +
+      "this question in the document -- do not answer from general knowledge as if it came from the document."
+    );
+  }
+
+  const locatorLabel = (chunk: RetrievedChunk) =>
+    document.paginated
+      ? `Page ${chunk.pageNumber}`
+      : chunk.lineStart !== null
+        ? `Lines ${chunk.lineStart}-${chunk.lineEnd}`
+        : document.filename;
+
+  const body = result.chunks.map((chunk) => `--- ${locatorLabel(chunk)} ---\n${chunk.text}`).join("\n\n");
+
+  const modeNote =
+    result.mode === "exact"
+      ? "These are ALL the passages in the document that literally match the search term -- if the user asked " +
+        "for every mention/instance of something, this is the complete set of matches, not a sample."
+      : "These are the passages retrieved as most relevant to this specific question -- not the whole " +
+        "document. If what the user is asking about isn't actually covered by what's shown below, say plainly " +
+        "that you couldn't find it in the retrieved excerpts rather than guessing; suggest a more specific " +
+        "question if the answer might be elsewhere in the document.";
+
+  return [
+    `Uploaded document "${document.filename}" is too large to load in full, so the following excerpts were ` +
+      "retrieved specifically for this question. Use ONLY this content to answer -- every locator below " +
+      `(${document.paginated ? "page" : "line range"}) is real, taken directly from the source document. NEVER ` +
+      "invent, estimate, or guess a page or line number -- only ever cite one shown in a marker below.",
+    modeNote,
+    body,
+  ].join("\n\n");
 }
 
 function buildLegacyDocumentContext(document: StoredDocument, text: string): string {
@@ -374,8 +428,11 @@ async function routeMessage(
   if (categoryContext) liveDataParts.push(categoryContext);
 
   // Uploaded-document context (Phase 15) -- same unconditional-push pattern,
-  // applies regardless of which branch below handles the message.
-  const documentContext = documentId ? await buildDocumentContext(documentId, userId) : null;
+  // applies regardless of which branch below handles the message. `text` is
+  // already query-resolved (resolveFollowupTopic above) -- the right thing
+  // to hand to document retrieval too, so a short follow-up like "what
+  // about the transportation section?" retrieves against its expanded form.
+  const documentContext = documentId ? await buildDocumentContext(documentId, userId, text) : null;
   if (documentContext) liveDataParts.push(documentContext);
 
   // Political Workspace project context -- a project's description is
