@@ -35,16 +35,28 @@ const EXHAUSTIVE_SEARCH_RE =
   /\bevery mention\b|\ball mentions\b|\bevery instance\b|\ball instances\b|\bevery occurrence\b|\ball occurrences\b|\bfind (?:all|every)\b|\bshow (?:me )?every\b/i;
 const EXHAUSTIVE_SEARCH_STEM_RE =
   /^(?:show me |find |list )?(?:every|all)\s+(?:mentions?|instances?|occurrences?)\s+of\s+/i;
+// Trailing filler that names the document itself rather than the actual
+// search topic -- "every mention of X in this document/file/PDF" must
+// search for X, not for "X AND document" (plainto_tsquery ANDs every
+// non-stopword term together, and "document"/"file"/"pdf" are common
+// enough in a natural question but not in the matched passages themselves,
+// so leaving them in silently zeroes out real matches).
+const TRAILING_DOCUMENT_REFERENCE_RE = /\s+(?:in|within|throughout)\s+(?:this|the)\s+(?:document|file|pdf|text|report)\b.*$/i;
 
 export function wantsExhaustiveSearch(query: string): boolean {
   return EXHAUSTIVE_SEARCH_RE.test(query);
 }
 
-// "Show me every mention of economic development" -> "economic
-// development" -- strips the instruction phrasing so the full-text query
-// searches for the actual topic, not the whole sentence.
+// "Show me every mention of economic development in this document" ->
+// "economic development" -- strips both the leading instruction phrasing
+// and trailing document-reference filler so the full-text query searches
+// for the actual topic alone.
 export function extractSearchTerm(query: string): string {
-  const stripped = query.replace(EXHAUSTIVE_SEARCH_STEM_RE, "").trim().replace(/[?.!]+$/, "");
+  const stripped = query
+    .replace(EXHAUSTIVE_SEARCH_STEM_RE, "")
+    .replace(TRAILING_DOCUMENT_REFERENCE_RE, "")
+    .trim()
+    .replace(/[?.!]+$/, "");
   return stripped.length > 0 ? stripped : query;
 }
 
@@ -55,7 +67,25 @@ const EXACT_MATCH_LIMIT = 500;
 
 export async function exactSearchDocument(documentId: string, userId: string, query: string): Promise<RetrievedChunk[]> {
   await ensureSchema();
-  const rows = (await sql`
+  // phraseto_tsquery requires the terms adjacent and in order -- the right
+  // match for "every mention of economic development" (the phrase as
+  // written), not just chunks where "economic" and "development" happen to
+  // co-occur unrelated to each other. Falls back to plainto_tsquery (a
+  // looser AND-of-terms match) only if the phrase match finds nothing, so
+  // an unusual phrasing in the source document still gets found rather
+  // than reporting zero mentions that are actually there.
+  const phraseRows = (await sql`
+    SELECT dc.page_number, dc.line_start, dc.line_end, dc.text_content
+    FROM document_chunks dc
+    JOIN documents d ON d.id = dc.document_id
+    WHERE dc.document_id = ${documentId} AND d.user_id = ${userId}
+      AND to_tsvector('english', dc.text_content) @@ phraseto_tsquery('english', ${query})
+    ORDER BY dc.page_number, dc.chunk_index
+    LIMIT ${EXACT_MATCH_LIMIT}
+  `) as ChunkRow[];
+  if (phraseRows.length > 0) return phraseRows.map(toRetrievedChunk);
+
+  const looseRows = (await sql`
     SELECT dc.page_number, dc.line_start, dc.line_end, dc.text_content
     FROM document_chunks dc
     JOIN documents d ON d.id = dc.document_id
@@ -64,7 +94,7 @@ export async function exactSearchDocument(documentId: string, userId: string, qu
     ORDER BY dc.page_number, dc.chunk_index
     LIMIT ${EXACT_MATCH_LIMIT}
   `) as ChunkRow[];
-  return rows.map(toRetrievedChunk);
+  return looseRows.map(toRetrievedChunk);
 }
 
 const SEMANTIC_MATCH_LIMIT = 10;
