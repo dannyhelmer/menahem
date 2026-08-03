@@ -68,28 +68,34 @@ export function sourceTierScore(url: string): number {
   return TIER_SORT_SCORE[sourceTier(url)];
 }
 
+// Legal-database/analysis domains -- ranked with academic sources (below
+// official government sources, above nonprofit policy orgs and all news).
+const LEGAL_ANALYSIS_DOMAINS = new Set(["courtlistener.com"]);
+
 // Finer-grained authority ranking than SourceTier -- reflects how a real
 // policy researcher would actually trust these sources relative to each
 // other, not just "government vs not." Used only for ordering; confidence
 // calculation elsewhere still uses the coarser SourceTier. Checked
 // most-specific-first (crsreports.congress.gov before the general
 // congress.gov suffix, etc.).
-// Order follows the product's stated priority: Congress.gov, Federal
-// Register, WhiteHouse.gov, Supreme Court, other government agencies (.gov),
-// CBO, GAO, Reuters, AP, other major national news, academic research,
-// secondary analysis, opinion sources, Wikipedia last.
+// Order follows the product's stated priority: official legislature
+// websites -> official government agencies -> official bill text ->
+// committee reports -> legislative fiscal notes -> government
+// implementation reports -> academic/legal analysis -> reputable nonprofit
+// policy organizations -> news (only if necessary) -> Wikipedia last. News
+// is deliberately ranked BELOW academic and nonprofit-policy sources here --
+// a wire service's summary of a bill is never preferred over the
+// legislature's own record or a nonpartisan policy analysis of it.
 const AUTHORITY_RULES: [(host: string) => boolean, number][] = [
   [(h) => h === "congress.gov", 100],
-  [(h) => h === "crsreports.congress.gov", 97],
+  [(h) => h === "crsreports.congress.gov", 98],
   [(h) => h === "federalregister.gov", 96],
   [(h) => h === "whitehouse.gov", 94],
   [(h) => h === "supremecourt.gov", 92],
   [(h) => h.endsWith(".house.gov") || h === "house.gov", 90],
   [(h) => h.endsWith(".senate.gov") || h === "senate.gov", 90],
-  [(h) => h === "cbo.gov", 85],
-  [(h) => h === "gao.gov", 84],
-  [(h) => h === "reuters.com", 80],
-  [(h) => h === "apnews.com", 79],
+  [(h) => h === "cbo.gov", 86], // legislative fiscal notes
+  [(h) => h === "gao.gov", 85], // government implementation reports
 ];
 
 export function sourceAuthorityRank(url: string): number {
@@ -99,12 +105,15 @@ export function sourceAuthorityRank(url: string): number {
   for (const [test, rank] of AUTHORITY_RULES) {
     if (test(bareHost)) return rank;
   }
-  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return 70; // other federal/state government agencies
-  if (WIRE_SERVICE_DOMAINS.has(bareHost)) return 60; // other wire services (Bloomberg, FT, BBC, NPR)
-  if (NATIONAL_NEWS_DOMAINS.has(bareHost)) return 45; // other major national news organizations
-  if (bareHost.endsWith(".edu")) return 35; // academic research
-  if (REFERENCE_DOMAINS.has(bareHost)) return 25; // secondary analysis (think tanks, advocacy research, reference sites)
-  if (LOCAL_NEWS_DOMAINS.has(bareHost)) return 22; // local news
+  // Any other official government agency (state legislature sites, agency
+  // implementation reports, etc.) -- still outranks every non-government
+  // source category below.
+  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil")) return 80;
+  if (bareHost.endsWith(".edu") || LEGAL_ANALYSIS_DOMAINS.has(bareHost)) return 65; // academic/legal analysis
+  if (REFERENCE_DOMAINS.has(bareHost)) return 55; // reputable nonprofit policy organizations
+  if (WIRE_SERVICE_DOMAINS.has(bareHost)) return 45; // news -- only if necessary
+  if (NATIONAL_NEWS_DOMAINS.has(bareHost)) return 40; // news -- only if necessary
+  if (LOCAL_NEWS_DOMAINS.has(bareHost)) return 20; // local news
   if (isWikipedia(url)) return 5; // background only -- never outranks a real primary source
   return 10;
 }

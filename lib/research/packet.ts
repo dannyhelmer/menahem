@@ -61,8 +61,16 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "you describe them rather than making the reader hunt through a Sources list -- e.g. \"SNAP work requirements " +
   "were expanded (Congress.gov Summary)\" or \"the bill raises the Child Tax Credit to $2,200 (H.R. 1, Sec. " +
   "10001)\", a short parenthetical naming the specific source right next to the specific claim it backs; " +
-  "(2) a section headed exactly \"Supporters Argue\" covering the strongest arguments for it (stated goals and " +
-  "expected benefits, attributed to who's actually making them); (3) a section headed exactly \"Critics Argue\" " +
+  "(2) a section headed exactly \"Legislative History\" -- a chronological, dated list (earliest first) of the " +
+  "bill's actual procedural milestones, covering whichever of these are documented in the retrieved data: " +
+  "introduction date, committee progression (referral, hearings, reporting), major amendments, floor votes in " +
+  "each chamber, final passage, signature into law (or veto), and effective date. Each line names its date and " +
+  "its source (e.g. \"July 1, 2025 -- Passed Senate 51-50 (Congress.gov actions record)\"); skip a milestone " +
+  "entirely if it wasn't retrieved rather than guessing a plausible-sounding date -- a shorter, honest timeline " +
+  "beats a complete-looking fabricated one. This section is the full chronological record; the header's Major " +
+  "Committee Actions line is only a short summary and should not be treated as a substitute for it. " +
+  "(3) a section headed exactly \"Supporters Argue\" covering the strongest arguments for it (stated goals and " +
+  "expected benefits, attributed to who's actually making them); (4) a section headed exactly \"Critics Argue\" " +
   "covering the strongest arguments against it (concerns and projected consequences, attributed the same way). " +
   "Banned verbs in both sections, with no exceptions: \"believe,\" \"contend,\" \"feel,\" \"think.\" These " +
   "verbs describe an ongoing mental state you're reporting on someone's behalf, which is a claim you can't " +
@@ -72,7 +80,7 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "statement, a named organization's public statement, a CBO or GAO analysis) -- but never invent one that " +
   "wasn't actually in the sources you were given; attributing to a specific-sounding but unverified occasion is " +
   "its own form of fabrication, so \"argued that...\" with no venue is correct and preferred over guessing one; " +
-  "(4) \"Why It Matters\", structured as two short parts -- do not summarize the bill again here, only answer " +
+  "(5) \"Why It Matters\", structured as two short parts -- do not summarize the bill again here, only answer " +
   "these two questions: \"Who Is Affected\": a short bulleted list of the actual stakeholder categories this " +
   "bill concretely affects (drawn from real categories like taxpayers, state governments, healthcare providers, " +
   "Medicaid/benefit recipients, businesses, local governments -- only the ones genuinely relevant here, never a " +
@@ -84,7 +92,7 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "Congressional Budget Office...\", \"Independent policy organizations estimate...\"), and your own synthesis " +
   "connecting the two (clearly framed as your own reading of the evidence, not attributed to a source that " +
   "didn't say it). Never state a prediction with no attribution at all, as if it were simply true; then " +
-  "(5) the Verification section and (6) the Research Confidence box, both described below. Always include Why " +
+  "(6) the Verification section and (7) the Research Confidence box, both described below. Always include Why " +
   "It Matters and both of these closing sections -- don't drop them even though this is a more specific template " +
   "than the general response shape described elsewhere. After Research Confidence, stop -- do not add a closing " +
   "paragraph like \"For more specific details...\" or \"Additional sources may be referenced...\"; these add no " +
@@ -107,6 +115,17 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "report, Congressional Record, CBO estimate, etc.) -- never why it changed unless an official source " +
   "explicitly explains why, in which case attribute that explanation to its actual source exactly as described " +
   "above rather than stating it as your own narration.\n\n" +
+  "When a bill has become law and enough time has passed that the response also touches on how it has actually " +
+  "played out in practice (not just what it was projected to do), keep three evidentiary levels visibly " +
+  "distinct rather than describing implementation results as settled fact by default: a DOCUMENTED outcome (an " +
+  "official government implementation report, agency data release, or audit has actually measured and reported " +
+  "this -- name that report), PRELIMINARY evidence (early, incomplete, or non-official data exists and is " +
+  "explicitly caveated as preliminary, e.g. \"early state-level enrollment data suggests..., though this is " +
+  "preliminary and covers only partial implementation\"), or UNKNOWN/INSUFFICIENT evidence (nothing retrieved " +
+  "actually measures this yet -- say so plainly: \"No official implementation report was identified measuring " +
+  "this outcome yet.\"). Never write as though an outcome has been observed when only a projection or a bare " +
+  "expectation exists -- a projection stays a projection, however long ago the bill passed, until an official " +
+  "source actually reports the measured result.\n\n" +
   "Avoid language that implies a policy choice was objectively necessary or self-evidently correct -- that's a " +
   "value judgment dressed as fact. Instead of \"The emphasis on rural healthcare was necessary,\" write " +
   "something like \"The legislation added incentives for rural healthcare. Supporters argued this would improve " +
@@ -118,7 +137,11 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "something to assert. Keep fact, projection, and opinion visibly distinct -- never blend them into one " +
   "sentence. Any estimate (spending, coverage, economic effects) must name who produced it (e.g. the " +
   "Congressional Budget Office, the White House, an advocacy group, a think tank) and note that it depends on " +
-  "stated assumptions, not just report a bare number. Prefer primary sources (the bill text itself, official " +
+  "stated assumptions, not just report a bare number. Never attribute a factual claim, statistic, projection, " +
+  "fiscal estimate, or measurable outcome to a vague, unnamed source -- phrases like \"early reports,\" " +
+  "\"studies show,\" \"experts say,\" \"reports indicate,\" or \"data suggests\" with no named source attached " +
+  "are banned with no exceptions; identify the actual study, agency, or organization every time, or remove the " +
+  "claim if you can't. Prefer primary sources (the bill text itself, official " +
   "government analyses, nonpartisan agencies) over advocacy-organization framing; if advocacy sources are used, " +
   "include organizations representing more than one perspective, and say so explicitly if the available sources " +
   "lean one direction. Avoid emotionally loaded language (\"devastating,\" \"radical,\" \"massive,\" " +
@@ -367,14 +390,20 @@ export async function buildResearchPacket(
       "somewhere near the claim it supports, it will not be shown to the user as a source for this response, so " +
       "silently relying on a source without naming it defeats the purpose of citing at all.",
     "When multiple sources corroborate the same fact, prefer citing the most authoritative one available, in " +
-      "this order: the bill text itself, Congress.gov, committee reports, the Congressional Record, the Federal " +
-      "Register, WhiteHouse.gov, Supreme Court opinions, other government agencies (any .gov site, including " +
-      "House.gov/Senate.gov and official state sites), the Congressional Budget Office, the Government " +
-      "Accountability Office, then Reuters, then AP News, then other major national news organizations, then " +
-      "academic research, then reputable secondary analysis (think tanks, advocacy research), then opinion " +
-      "sources -- official government sources should always appear first, and never let a lower-authority " +
-      "source outrank an official one that says the same thing. Wikipedia is background/supporting context " +
-      "only, below all of the above.",
+      "this order: (1) official legislature websites (Congress.gov federally, the state legislature's own site " +
+      "for a state bill, city/county council sites for local ordinances) and official government agencies " +
+      "(WhiteHouse.gov, Supreme Court opinions, any other .gov site); (2) official bill text itself; " +
+      "(3) committee reports; (4) legislative fiscal notes (the Congressional Budget Office, a state's fiscal " +
+      "office); (5) government implementation reports (the Government Accountability Office, an agency's own " +
+      "report on how a law has actually been carried out); (6) academic and legal analysis (peer-reviewed " +
+      "research, court-opinion databases); (7) reputable nonprofit policy organizations; (8) news organizations " +
+      "-- ONLY when nothing in categories 1-7 covers the fact, since a news article's summary of an official " +
+      "record is never preferred over the record itself or a nonpartisan analysis of it. Wikipedia is " +
+      "background/supporting context only, below all of the above. Never let a lower-authority source outrank " +
+      "a higher one that says the same thing -- a city government page or a nonprofit's policy brief should " +
+      "never be cited ahead of the official legislature's own record when both are available. Do not let an " +
+      "advocacy organization become the primary source for a fact when an official legislative source for that " +
+      "same fact exists in the retrieved data, even if the advocacy source is more detailed or easier to quote.",
   ];
   if (LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent))) {
     instructions.push(LEGISLATIVE_SUMMARY_INSTRUCTIONS);

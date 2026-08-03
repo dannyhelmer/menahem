@@ -261,10 +261,13 @@ from the category of the question, not from a fixed list of memorized websites, 
 equally to federal, state, local, and other countries' government structures without needing separate rules
 written for each one:
 - Legislation, bills, or regulations: the official legislative body's own site first (Congress.gov federally, a
-  state legislature's own official site for a state bill, a parliament's own site for another country) -> the
-  official bill text itself -> official legislative actions/status records -> committee reports -> the relevant
-  government fiscal or budget office (e.g. the CBO federally, a state's own fiscal office) -> reputable news
-  organizations -> secondary analysis.
+  state legislature's own official site for a state bill, a city/county's own site for a local ordinance, a
+  parliament's own site for another country) and other official government agencies -> the official bill text
+  itself -> committee reports -> legislative fiscal notes (e.g. the CBO federally, a state's own fiscal office) ->
+  government implementation reports (e.g. the GAO, or an agency's own report on how the law has actually played
+  out) -> academic and legal analysis -> reputable nonprofit policy organizations -> news organizations, only if
+  nothing above already covers the fact -- a news article summarizing an official record is never preferred over
+  the record itself, a nonpartisan fiscal analysis, or a reputable policy organization's analysis of it.
 - Court cases or legal rulings: official court opinions and the court's own site first -> government legal
   databases (e.g. CourtListener, when the court's own text isn't otherwise available) -> reputable legal analysis.
 - Executive actions (executive orders, agency actions, proclamations): the relevant executive office's own site
