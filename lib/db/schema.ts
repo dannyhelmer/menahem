@@ -164,6 +164,30 @@ async function runMigrations(): Promise<void> {
     ON document_chunks USING GIN (to_tsvector('english', text_content))
   `;
 
+  // Document intelligence Phase 4: structured financial data, extracted
+  // once and cached, so budget statistics (percentage changes, totals,
+  // largest categories) can be COMPUTED IN CODE from real numbers instead
+  // of asked of the model. `financial_extraction_attempted` distinguishes
+  // "not tried yet" from "tried, found nothing" (most uploads aren't
+  // budget documents) so extraction only ever runs once per document.
+  await sql`ALTER TABLE documents ADD COLUMN IF NOT EXISTS financial_extraction_attempted boolean NOT NULL DEFAULT false`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS document_financial_line_items (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      category text NOT NULL,
+      amount numeric NOT NULL,
+      fiscal_year text,
+      page_number int,
+      source_snippet text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS document_financial_line_items_document_id_idx
+    ON document_financial_line_items(document_id)
+  `;
+
   await sql`
     CREATE TABLE IF NOT EXISTS app_settings (
       key text PRIMARY KEY,

@@ -28,6 +28,11 @@ import { getDocument, getDocumentPages, getDocumentText } from "@/lib/documents/
 import type { DocumentPage, StoredDocument } from "@/lib/documents/types";
 import { retrieveRelevantChunks, type RetrievalResult, type RetrievedChunk } from "@/lib/documents/retrieval";
 import { verifyDocumentCitations, type DocumentCitationContext } from "@/lib/documents/citation-verification";
+import { extractFinancialLineItems } from "@/lib/documents/budget-extract";
+import { getFinancialLineItems, hasAttemptedFinancialExtraction, saveFinancialLineItems } from "@/lib/documents/budget-store";
+import { computeBudgetAnalysis, type BudgetAnalysis } from "@/lib/documents/budget-analysis";
+import { verifyBudgetObjectiveFindings } from "@/lib/documents/budget-verification";
+import { wantsBudgetAnalysis } from "@/lib/intelligence/budget-intent";
 import { getProject } from "@/lib/notebook/store";
 import { getResearchCategory } from "@/lib/research-categories/config";
 import {
@@ -382,6 +387,111 @@ function buildLineNumberedDocumentContext(document: StoredDocument, pages: Docum
   };
 }
 
+interface BudgetAnalysisContextResult {
+  text: string;
+  analysis: BudgetAnalysis;
+}
+
+// Document Intelligence Phase 4: extraction runs at most once per document
+// (cached via hasAttemptedFinancialExtraction/financial_extraction_attempted
+// -- most uploads aren't budget documents, so this only costs an extra LLM
+// call the first time someone actually asks a budget-statistics question
+// about a given document, not on every upload). Every number handed to the
+// model below was computed in plain arithmetic from verified line items --
+// never something the model is asked to calculate itself.
+async function buildBudgetAnalysisContext(documentId: string, userId: string): Promise<BudgetAnalysisContextResult | null> {
+  const document = await getDocument(documentId, userId);
+  if (!document) return null;
+
+  if (!(await hasAttemptedFinancialExtraction(documentId, userId))) {
+    const pages = await getDocumentPages(documentId, userId);
+    const items = pages.length > 0 ? await extractFinancialLineItems(pages, document.paginated, userId) : [];
+    await saveFinancialLineItems(documentId, userId, items);
+  }
+
+  const items = await getFinancialLineItems(documentId, userId);
+  if (items.length === 0) {
+    return {
+      text:
+        `No specific budget or financial line items with a verifiable dollar amount could be extracted from ` +
+        `"${document.filename}". Do NOT compute or state any financial statistics (percentages, totals, ` +
+        "year-over-year changes, per-resident spending) for this document -- if asked, say plainly that this " +
+        "document doesn't contain extractable structured financial data for that kind of analysis.",
+      analysis: {
+        categoryTotals: [],
+        largestCategories: [],
+        totalsByYear: [],
+        yearOverYearChanges: [],
+        biggestYearOverYearChanges: [],
+        missingCategories: [],
+        spendingPerResident: [],
+      },
+    };
+  }
+
+  const analysis = computeBudgetAnalysis(items);
+  const fmt = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+
+  const lines: string[] = [];
+  lines.push(`Verified financial line items extracted from "${document.filename}" (${items.length} items):`);
+  for (const item of items) {
+    lines.push(
+      `- ${item.category}: ${fmt(item.amount)}${item.fiscalYear ? ` (${item.fiscalYear})` : ""}` +
+        `${item.pageNumber ? ` [page ${item.pageNumber}]` : ""}`,
+    );
+  }
+
+  lines.push("\nPRE-COMPUTED statistics (calculated in code from the line items above -- do not recompute, round differently, or alter any of these; only narrate them):");
+  if (analysis.totalsByYear.length > 0) {
+    lines.push("Totals by fiscal year:");
+    for (const t of analysis.totalsByYear) lines.push(`- ${t.fiscalYear ?? "(year not stated)"}: ${fmt(t.total)}`);
+  }
+  if (analysis.largestCategories.length > 0) {
+    lines.push("Largest categories:");
+    for (const c of analysis.largestCategories) lines.push(`- ${c.category}${c.fiscalYear ? ` (${c.fiscalYear})` : ""}: ${fmt(c.amount)}`);
+  }
+  if (analysis.yearOverYearChanges.length > 0) {
+    lines.push(`Year-over-year changes (${analysis.yearOverYearChanges[0].fromYear} -> ${analysis.yearOverYearChanges[0].toYear}):`);
+    for (const c of analysis.yearOverYearChanges) {
+      lines.push(
+        `- ${c.category}: ${fmt(c.fromAmount)} -> ${fmt(c.toAmount)} (${c.dollarChange >= 0 ? "+" : ""}${fmt(c.dollarChange)}, ${c.percentChange >= 0 ? "+" : ""}${c.percentChange}%)`,
+      );
+    }
+  } else if (analysis.totalsByYear.length > 2) {
+    lines.push(
+      "Year-over-year change was NOT computed: more than two fiscal years were found in the extracted data, " +
+        "so which pair of years to compare is ambiguous -- do not compute or state a year-over-year percentage " +
+        "yourself; ask the user which two years they want compared if that's what they need.",
+    );
+  }
+  if (analysis.missingCategories.length > 0) {
+    lines.push("Categories present in one year but missing in the other (documented gaps):");
+    for (const m of analysis.missingCategories) {
+      lines.push(`- ${m.category}: present in ${m.presentInYear}, not found in ${m.missingInYear}`);
+    }
+  }
+  if (analysis.spendingPerResident.length > 0) {
+    lines.push("Spending per resident (population figure was itself extracted from the document):");
+    for (const s of analysis.spendingPerResident) {
+      lines.push(`- ${s.fiscalYear ?? "(year not stated)"}: ${fmt(s.totalSpending)} / ${s.population.toLocaleString()} residents = ${fmt(s.perResident)} per resident`);
+    }
+  }
+
+  lines.push(
+    "\nStructure your answer with two clearly separated, exactly-headed sections. \"Objective Findings\" must " +
+      "contain ONLY the numbers listed above, stated plainly with no evaluative language (no \"concerning,\" " +
+      "\"significant,\" \"reflects,\" \"should\") -- verifiable math and extracted facts only, nothing you " +
+      "computed yourself. Write every figure in full (e.g. \"$4,200,000\" and \"12%\", never abbreviated forms " +
+      "like \"$4.2M\") so it can be mechanically checked against what was actually computed. \"Policy Analysis\" " +
+      "comes after, clearly framed as interpretation -- possible explanations, pros, drawbacks, and competing " +
+      "viewpoints, never presented as fact and never blended into Objective Findings. If a statistic the user " +
+      "asked about wasn't computed above (e.g. it needs a comparison this data doesn't support), say so plainly " +
+      "in Objective Findings rather than estimating it.",
+  );
+
+  return { text: lines.join("\n"), analysis };
+}
+
 // Deterministic (no LLM call) resolution of a short jurisdiction reply
 // ("Illinois") following our own clarification question -- combines it with
 // the original ambiguous question so intent/state detection re-run against
@@ -451,6 +561,13 @@ interface RouteOutcome {
   // attached document has no real page/line data to check against (a
   // legacy pre-Phase-1 upload).
   documentCitationCheck?: DocumentCitationContext | null;
+  // Document Intelligence Phase 4: the computed budget statistics actually
+  // handed to the model this turn (if a budget-analysis question was asked
+  // against an attached document) -- ground truth for
+  // verifyBudgetObjectiveFindings, called after generation alongside the
+  // Phase 3 citation check. Null unless this specific turn triggered
+  // budget analysis.
+  budgetAnalysis?: BudgetAnalysis | null;
 }
 
 const DEEP_RESEARCH_MAX_TOKENS = 12000;
@@ -493,6 +610,13 @@ async function routeMessage(
   const documentContext = documentId ? await buildDocumentContext(documentId, userId, text) : null;
   if (documentContext) liveDataParts.push(documentContext.text);
 
+  // Document Intelligence Phase 4: a budget-statistics question against an
+  // attached document gets its own supplementary context, computed in code
+  // from extracted line items -- never left to the model to calculate.
+  const budgetAnalysis =
+    documentId && wantsBudgetAnalysis(text) ? await buildBudgetAnalysisContext(documentId, userId) : null;
+  if (budgetAnalysis) liveDataParts.push(budgetAnalysis.text);
+
   // Political Workspace project context -- a project's description is
   // permanent background for every AI response inside that project, not
   // just a label shown in the UI. Silently omitted if the project can't be
@@ -516,6 +640,7 @@ async function routeMessage(
       grounded: false,
       resolvedUserText: text,
       documentCitationCheck: documentContext?.citationCheck ?? null,
+      budgetAnalysis: budgetAnalysis?.analysis ?? null,
     };
   }
 
@@ -531,6 +656,7 @@ async function routeMessage(
       grounded: false,
       resolvedUserText: text,
       documentCitationCheck: documentContext?.citationCheck ?? null,
+      budgetAnalysis: budgetAnalysis?.analysis ?? null,
     };
   }
 
@@ -550,6 +676,7 @@ async function routeMessage(
       grounded: true,
       resolvedUserText: text,
       documentCitationCheck: documentContext?.citationCheck ?? null,
+      budgetAnalysis: budgetAnalysis?.analysis ?? null,
     };
   }
 
@@ -574,6 +701,7 @@ async function routeMessage(
         grounded: true,
         resolvedUserText: text,
         documentCitationCheck: documentContext?.citationCheck ?? null,
+        budgetAnalysis: budgetAnalysis?.analysis ?? null,
       };
     }
   }
@@ -601,6 +729,7 @@ async function routeMessage(
       grounded: true,
       resolvedUserText: text,
       documentCitationCheck: documentContext?.citationCheck ?? null,
+      budgetAnalysis: budgetAnalysis?.analysis ?? null,
     };
   }
 
@@ -626,6 +755,7 @@ async function routeMessage(
         grounded: true,
         resolvedUserText: text,
         documentCitationCheck: documentContext?.citationCheck ?? null,
+        budgetAnalysis: budgetAnalysis?.analysis ?? null,
       };
     }
   }
@@ -671,6 +801,7 @@ async function routeMessage(
       grounded: true,
       resolvedUserText: text,
       documentCitationCheck: documentContext?.citationCheck ?? null,
+      budgetAnalysis: budgetAnalysis?.analysis ?? null,
     };
   }
 
@@ -783,6 +914,7 @@ async function routeMessage(
     grounded: shouldSearch,
     resolvedUserText: text,
     documentCitationCheck: documentContext?.citationCheck ?? null,
+    budgetAnalysis: budgetAnalysis?.analysis ?? null,
   };
 }
 
@@ -957,6 +1089,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
           grounded,
           resolvedUserText,
           documentCitationCheck,
+          budgetAnalysis,
         } = await routeMessage(
           userMessage.content,
           messages,
@@ -1119,6 +1252,29 @@ export const POST = withAuth(async (request, _ctx, user) => {
               `\n\nNote: this response cited a ${documentCitationCheck.paginated ? "page" : "line"} number for ` +
               `"${documentCitationCheck.filename}" that could not be mechanically verified against what was ` +
               "actually retrieved for this question -- treat that specific citation with caution.";
+            if (!assistantText.includes(notice.trim())) {
+              assistantText = assistantText.trimEnd() + notice;
+            }
+          }
+        }
+
+        // BUDGET ANALYSIS VERIFICATION (Phase 4): any number the model
+        // wrote in the "Objective Findings" section must match one it was
+        // actually given (computed in code from verified line items, see
+        // buildBudgetAnalysisContext) -- never something the model
+        // calculated or misremembered itself. Same mechanical-check-not-
+        // just-a-prompt pattern as Phase 3.
+        if (budgetAnalysis) {
+          const budgetIssues = verifyBudgetObjectiveFindings(assistantText, budgetAnalysis);
+          if (budgetIssues.length > 0) {
+            console.warn(
+              `[budget-verification] unverified objective figures: ` +
+                budgetIssues.map((i) => `${i.type}: ${i.detail}`).join("; "),
+            );
+            const notice =
+              "\n\nNote: this response's Objective Findings included a number that could not be mechanically " +
+              "verified against the figures actually computed from this document -- treat that specific figure " +
+              "with caution.";
             if (!assistantText.includes(notice.trim())) {
               assistantText = assistantText.trimEnd() + notice;
             }
