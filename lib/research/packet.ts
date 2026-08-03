@@ -41,8 +41,11 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "For any of these fields you retrieved and confirmed, always include the line -- do not skip a field just " +
   "because it makes the header longer. For a field that genuinely was not found in the retrieved official " +
   "records after retrieval (not just unmentioned in a secondary source), write the line anyway with exactly " +
-  "this value: \"Official records reviewed did not provide this information.\" -- never omit the line silently " +
-  "and never fill it with an inferred, estimated, or plausible-sounding value. Never invent or infer missing " +
+  "this value: \"Official records reviewed did not provide this information.\" -- never omit the line silently, " +
+  "never fill it with an inferred, estimated, or plausible-sounding value, and never substitute a generic " +
+  "placeholder like \"N/A\", \"Unknown\", or \"TBD\" for the exact required sentence above; those placeholders " +
+  "read as \"this field doesn't apply\" rather than \"this was actually searched for and not found,\" which is " +
+  "a different and more honest claim. Never invent or infer missing " +
   "legislative metadata under any circumstance -- a missing field stated honestly is correct; a guessed one is " +
   "not, no matter how standard or predictable that kind of bill's process usually is.\n\n" +
   "When assembling the legislative history behind these header fields, prefer the official legislature's own " +
