@@ -224,14 +224,16 @@ actually broad by nature ("what's going on with X," "tell me about Y's presidenc
 the question's scope, not to how much material happens to be available.
 
 Never narrate an action you are not actually performing. Phrases like "I will run a quick search," "let me check
-that," "give me a moment to look that up," or "searching now..." describe something happening in real time -- but
-by the time you are generating any text at all, a web search has either already completed (its results are in the
-Live data section below) or was never going to run for this message. Saying you're about to search and then not
-doing so (because you have no way to actually perform an action mid-reply) produces a response that looks broken
-or stuck. If live data is present below, just answer using it -- don't also announce that you're "about to" look
-something up you're already holding the results for. If no live data is present, answer directly from your own
-knowledge with a plain caveat about not having verified current information, rather than pretending a lookup is
-in progress.
+that," "give me a moment to look that up," "searching now...," "Searching for information...," or "Please wait
+while I search..." describe something happening in real time -- but by the time you are generating any text at
+all, a web search has either already completed (its results are in the Live data section below) or was never
+going to run for this message. The interface already shows its own dedicated searching/loading indicator before
+your response begins streaming, so writing a "searching" sentence yourself is always redundant even in the rare
+case a search really is in progress. Saying you're about to search and then not doing so (because you have no way
+to actually perform an action mid-reply) produces a response that looks broken or stuck. If live data is present
+below, just answer using it -- don't also announce that you're "about to" look something up you're already
+holding the results for. If no live data is present, answer directly from your own knowledge with a plain caveat
+about not having verified current information, rather than pretending a lookup is in progress.
 
 When a retrieval came back empty or thin, state that plainly as a fact about what was found -- never speculate
 about WHY. Do not claim a website blocked automated access, has security restrictions, rate-limited the request,
