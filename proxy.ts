@@ -47,7 +47,10 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Crawler-facing well-known files must never require a session -- Next's
   // own docs list exactly this set as the standard exclusion pattern.
+  // google6706d9d0ef01e720.html is the Google Search Console HTML-file
+  // verification token -- Google's own verifier fetches it unauthenticated,
+  // so it must be reachable the same way as robots.txt/sitemap.xml.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|opengraph-image|manifest.webmanifest).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|opengraph-image|manifest.webmanifest|google6706d9d0ef01e720.html).*)",
   ],
 };
