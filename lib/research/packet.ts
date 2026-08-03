@@ -362,7 +362,7 @@ export async function buildResearchPacket(
     if (result.success && result.liveData) {
       liveDataParts.push(result.liveData);
       directGovHit = true;
-      for (const s of result.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url), provenance: "always_keep" });
+      for (const s of result.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url, s.title), provenance: "always_keep" });
 
       const relatedNote = await buildRelatedEntitiesNote(result.graph?.representativeId, result.graph?.entityId);
       if (relatedNote) liveDataParts.push(relatedNote);
@@ -395,7 +395,7 @@ export async function buildResearchPacket(
   });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
-    for (const s of searchResult.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url), provenance: "web_search" });
+    for (const s of searchResult.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url, s.title), provenance: "web_search" });
     // Only flag this to the model when nothing else in the packet already
     // confirms the answer -- a direct government-data-provider hit means
     // overall confidence is fine even if this supplementary web search
@@ -421,29 +421,35 @@ export async function buildResearchPacket(
       "name/cite a source you actually drew on -- if you don't name it (its title, publication, or domain) " +
       "somewhere near the claim it supports, it will not be shown to the user as a source for this response, so " +
       "silently relying on a source without naming it defeats the purpose of citing at all.",
-    "When multiple sources corroborate the same fact, prefer citing the most authoritative one available, in " +
-      "this order: (1) the official legislature's own site (Congress.gov federally, the state legislature's own " +
-      "site for a state bill -- e.g. the Florida Senate or Florida House for a Florida bill -- a city/county " +
-      "council site for a local ordinance); (2) the official bill text itself; (3) the official legislative " +
-      "history/status record (committee referrals, actions, votes as recorded by the legislature itself); " +
-      "(4) official executive action on the bill (a governor's or the President's signature/veto record, e.g. " +
-      "the Governor's Office); (5) other official state or federal agencies (e.g. a state's official statutes " +
-      "site, a department directly named in the bill); (6) legislative fiscal notes (the Congressional Budget " +
-      "Office, a state's fiscal office); (7) government implementation reports (the Government Accountability " +
-      "Office, or -- ranked below every source in categories 1-6 -- a LOCAL government's own page on how it is " +
-      "implementing a state or federal law, e.g. a city or county page about a state act; this kind of page " +
-      "must never replace or outrank the state's own legislative record for facts about the law itself, only " +
-      "supplement it for local implementation detail); (8) academic and legal analysis (peer-reviewed research, " +
-      "court-opinion databases); (9) reputable nonprofit policy organizations; (10) news organizations -- ONLY " +
-      "when nothing in categories 1-9 covers the fact, since a news article's summary of an official record is " +
-      "never preferred over the record itself or a nonpartisan analysis of it. Wikipedia is background/" +
-      "supporting context only, below all of the above. Never let a lower-authority source outrank a higher one " +
-      "that says the same thing -- a city or county implementation page must never replace the state " +
-      "legislature's own record as the source for what a state law actually says or how it moved through the " +
-      "legislature, even when the local page is more detailed, easier to read, or more directly about the " +
-      "user's own city. Do not let an advocacy organization become the primary source for a fact when an " +
-      "official legislative source for that same fact exists in the retrieved data, even if the advocacy source " +
-      "is more detailed or easier to quote.",
+    "For legislation, ALWAYS search for and prefer official government sources first, in this exact priority " +
+      "order. Federally: (1) Congress.gov, (2) House.gov, (3) Senate.gov, (4) the Federal Register, " +
+      "(5) govinfo.gov, (6) SupremeCourt.gov, (7) other federal agency (.gov) sites. For a state bill: " +
+      "(1) the official state legislature/General Assembly site (e.g. the Florida Senate or Florida House for a " +
+      "Florida bill), (2) the official state bill-status page, (3) the official state statutes/code, " +
+      "(4) the Governor's official site, (5) official state agency (.gov) sites, (6) official state courts. For " +
+      "a local ordinance: (1) the county government site, (2) the municipal government site. Only AFTER " +
+      "exhausting official government sources for a given fact should you use: universities, government-funded " +
+      "research organizations, the CBO/CRS/GAO (official and nonpartisan, but they analyze legislation rather " +
+      "than being the legislative record itself -- never let a CBO/CRS/GAO estimate replace the bill's own " +
+      "official record of what it says or where it stands procedurally), Ballotpedia, other nonprofit policy " +
+      "organizations, news organizations, or other private websites. Wikipedia is background/supporting context " +
+      "only, below all of the above.\n\n" +
+      "When multiple sources describe the same bill, always prefer: the official bill page, the official bill " +
+      "text, official legislative history, official vote records, official committee reports, and official " +
+      "fiscal notes, over any third party's summary of them -- a summary (news article, advocacy post, blog, or " +
+      "even a nonprofit's otherwise-reputable explainer) must never replace an official record that says the " +
+      "same thing, no matter how much clearer or more detailed the summary reads. Never let a lower-authority " +
+      "source outrank a higher one that says the same thing -- a city or county implementation page must never " +
+      "replace the state legislature's own record as the source for what a state law actually says or how it " +
+      "moved through the legislature, even when the local page is more detailed, easier to read, or more " +
+      "directly about the user's own city. Do not let an advocacy organization become the primary source for a " +
+      "fact when an official legislative source for that same fact exists in the retrieved data, even if the " +
+      "advocacy source is more detailed or easier to quote.\n\n" +
+      "If no official legislative source could be found for a specific piece of information after retrieval " +
+      "(including the automatic broadened retry), do not silently substitute a private, advocacy, or news " +
+      "source as if it were equivalent -- say so explicitly, using exactly this sentence right before you " +
+      "present what secondary sources did find: \"No official legislative source could be located for this " +
+      "information. The following secondary sources were used instead.\"",
   ];
   if (LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent))) {
     instructions.push(LEGISLATIVE_SUMMARY_INSTRUCTIONS);

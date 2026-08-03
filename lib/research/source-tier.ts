@@ -1,38 +1,57 @@
 // Source ranking. SourceTier stays the coarse 4-bucket type everywhere it's
 // already used for counts/UI (government/news/reference/general), but the
-// domain lists and sourceAuthorityRank below implement a finer 6-tier
-// authority order for actual SORTING within those buckets: (1) official
-// government, (2) wire services (Reuters/AP/Bloomberg/FT/BBC/NPR), (3)
-// national newspapers, (4) local news, (5) academic/think-tank, (6)
-// Wikipedia -- ranked lowest, background-only, never the primary source
-// when anything above it is available.
+// domain lists and sourceAuthorityRank below implement a much finer
+// authority order for actual SORTING/citation preference within those
+// buckets. Both sourceTier (used for Evidence Strength / confidence
+// counting) and sourceAuthorityRank (used for display/citation order) take
+// the source's title, not just its URL -- domain naming has no consistent
+// pattern across the 50 states, so distinguishing e.g. a state legislature
+// from a county government page has to be done from what the page actually
+// says it is, not guessed from its hostname.
 export type SourceTier = "government" | "news" | "reference" | "general";
 
 const GOVERNMENT_DOMAINS = new Set([
   "who.int", "un.org", "imf.org", "worldbank.org", "federalreserve.gov", "congress.gov", "supremecourt.gov",
 ]);
 
-// Tier 2: wire services -- the most consistently authoritative, least
+// Tier: wire services -- the most consistently authoritative, least
 // editorialized news sources, reported first and syndicated everywhere.
 const WIRE_SERVICE_DOMAINS = new Set([
   "apnews.com", "reuters.com", "bloomberg.com", "ft.com", "bbc.com", "bbc.co.uk", "npr.org",
 ]);
-// Tier 3: national newspapers/broadcasters.
+// National newspapers/broadcasters.
 const NATIONAL_NEWS_DOMAINS = new Set([
   "nytimes.com", "washingtonpost.com", "wsj.com", "usatoday.com", "politico.com", "axios.com",
   "thehill.com", "cbsnews.com", "nbcnews.com", "abcnews.go.com", "cnn.com", "foxnews.com", "pbs.org", "c-span.org",
 ]);
-// Tier 4: known local news outlets (extend as specific markets come up --
-// anything ending in common local-station patterns still falls through to
-// the generic "news" bucket below via NEWS-shaped domain heuristics).
+// Known local news outlets (extend as specific markets come up -- anything
+// ending in common local-station patterns still falls through to the
+// generic "news" bucket below via NEWS-shaped domain heuristics).
 const LOCAL_NEWS_DOMAINS = new Set(["wrex.com", "wifr.com", "rockfordregisterstar.com"]);
 
 const NEWS_DOMAINS = new Set([...WIRE_SERVICE_DOMAINS, ...NATIONAL_NEWS_DOMAINS, ...LOCAL_NEWS_DOMAINS]);
 
-// Tier 5: academic/reference/think-tank.
-const REFERENCE_DOMAINS = new Set(["ballotpedia.org", "opensecrets.org", "votesmart.org", "courtlistener.com"]);
-// Tier 6: Wikipedia -- background/fallback only, never primary when
-// anything above it exists.
+// Congressional Budget Office / Congressional Research Service / Government
+// Accountability Office -- official, nonpartisan, and genuinely
+// authoritative, but explicitly a SECONDARY tier here: they produce
+// analysis and cost estimates ABOUT legislation, not the legislative record
+// itself (bill text, status, votes, committee action). A CBO estimate must
+// never replace or outrank the bill's own official record for what the
+// bill actually says or where it stands procedurally -- it supplements
+// that record with fiscal analysis.
+const ANALYSIS_AGENCY_DOMAINS = new Set(["cbo.gov", "gao.gov", "crsreports.congress.gov", "everycrsreport.com"]);
+
+// Academic/legal-analysis domains (secondary tier: universities, legal
+// databases -- useful analysis, never a substitute for an official record).
+const LEGAL_ANALYSIS_DOMAINS = new Set(["courtlistener.com"]);
+
+// Ballotpedia and other nonprofit policy/reference organizations -- useful
+// secondary context, never preferred over an official source that covers
+// the same fact.
+const BALLOTPEDIA_DOMAIN = "ballotpedia.org";
+const REFERENCE_DOMAINS = new Set(["ballotpedia.org", "opensecrets.org", "votesmart.org"]);
+// Wikipedia -- background/fallback only, never primary when anything above
+// it exists.
 const WIKIPEDIA_DOMAINS = new Set(["wikipedia.org"]);
 
 const TIER_SORT_SCORE: Record<SourceTier, number> = { government: 4, news: 3, reference: 2, general: 1 };
@@ -51,7 +70,52 @@ export function isWikipedia(url: string): boolean {
   return bareHost !== null && (bareHost === "wikipedia.org" || bareHost.endsWith(".wikipedia.org"));
 }
 
-export function sourceTier(url: string): SourceTier {
+// --- State/local government classification (title-based) -------------------
+//
+// Everything below distinguishes categories of official government source
+// within the generic .gov/.mil/.us bucket, purely from what a page's own
+// title says it is -- checked most-specific/highest-priority first, so an
+// ambiguous title (e.g. one that could read as either a legislature page or
+// a statutes page) resolves to whichever category this project's stated
+// priority order ranks higher.
+const STATE_LEGISLATURE_RE =
+  /\b(state )?senate\b|\bhouse of representatives\b|\bgeneral assembly\b|\bstate legislature\b|\blegislature\b|\bbill status\b|\bbill history\b|\bbill tracking\b|\blegislative information\b/i;
+const STATE_STATUTES_RE = /\bstatutes?\b|\brevised (statutes|code)\b|\bstate code\b|\bsession laws?\b|\badministrative code\b/i;
+const GOVERNOR_RE = /\bgovernor'?s?( office)?\b/i;
+const STATE_COURTS_RE = /\bsupreme court\b|\bcourt of appeals\b|\bappellate court\b|\bstate court\w*\b/i;
+const STATE_AGENCY_RE = /\bdepartment of\b|\bstate agency\b|\bdivision of\b|\bstate commission\b/i;
+const COUNTY_GOV_RE = /\bcounty\b|\bparish of\b/i;
+const MUNICIPAL_GOV_RE =
+  /\bcity of\b|\btown of\b|\bvillage of\b|\btownship of\b|\bborough of\b|\bcity council\b|\bcity government\b|\bmunicipal\w*\b/i;
+
+type GovCategory = "state_legislature" | "state_statutes" | "governor" | "state_courts" | "state_agency" | "county" | "municipal" | "unclassified";
+
+// Checked in the project's stated priority order: the legislative record
+// itself outranks statutes/code, which outranks the executive branch, which
+// outranks courts and agencies, which outrank local government -- county
+// before municipal, matching the requested list order.
+function classifyGovSource(title: string): GovCategory {
+  if (STATE_LEGISLATURE_RE.test(title)) return "state_legislature";
+  if (STATE_STATUTES_RE.test(title)) return "state_statutes";
+  if (GOVERNOR_RE.test(title)) return "governor";
+  if (STATE_COURTS_RE.test(title)) return "state_courts";
+  if (STATE_AGENCY_RE.test(title)) return "state_agency";
+  if (COUNTY_GOV_RE.test(title)) return "county";
+  if (MUNICIPAL_GOV_RE.test(title)) return "municipal";
+  return "unclassified";
+}
+
+// A city/county page describing how it implements a state or federal law
+// (e.g. a Fort Myers or Orange County page about Florida's Live Local Act)
+// is legitimate supplementary content, but it is NOT a primary official
+// legislative source -- Evidence Strength must not count it as an "Official
+// Government Source" just because it happens to be hosted on .gov/.us.
+function isLocalGovernmentSource(title: string): boolean {
+  const category = classifyGovSource(title);
+  return category === "county" || category === "municipal";
+}
+
+export function sourceTier(url: string, title = ""): SourceTier {
   const bareHost = bareHostOf(url);
   if (bareHost === null) return "general";
 
@@ -59,7 +123,16 @@ export function sourceTier(url: string): SourceTier {
   if (NEWS_DOMAINS.has(bareHost)) return "news";
   if (REFERENCE_DOMAINS.has(bareHost)) return "reference";
   if (isWikipedia(url)) return "reference";
-  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil") || bareHost.endsWith(".us")) return "government";
+  if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil") || bareHost.endsWith(".us")) {
+    // Official government domain -- EXCEPT a county/municipal
+    // implementation page, which does not count as a primary legislative
+    // source no matter what TLD it happens to be hosted on. CBO/GAO/CRS
+    // domains still count as "government" here (they genuinely are
+    // official government sources); they're only demoted in
+    // sourceAuthorityRank's CITATION PREFERENCE order below, not excluded
+    // from this tier.
+    return isLocalGovernmentSource(title) ? "general" : "government";
+  }
   if (bareHost.endsWith(".edu")) return "reference";
   return "general";
 }
@@ -68,55 +141,45 @@ export function sourceTierScore(url: string): number {
   return TIER_SORT_SCORE[sourceTier(url)];
 }
 
-// Legal-database/analysis domains -- ranked with academic sources (below
-// official government sources, above nonprofit policy orgs and all news).
-const LEGAL_ANALYSIS_DOMAINS = new Set(["courtlistener.com"]);
-
-// Within the generic government-domain bucket, distinguishes STATE-level
-// official bodies (legislature, governor, state statutes/agencies) from
-// LOCAL city/county implementation pages -- both are legitimate official
-// government sources, but a city's page describing how it applies a state
-// law (e.g. a Fort Myers or Orange County page about Florida's Live Local
-// Act) is never a substitute for the state legislature's own record, and
-// must rank below it even though both are technically ".gov". Matched
-// against the source's title (not the URL, since municipal domain naming
-// has no consistent pattern across jurisdictions) -- state hint checked
-// first so a page titled e.g. "Florida Department of Revenue: County Tax
-// Guidance" is correctly read as a state agency, not a county page.
-const STATE_LEVEL_GOV_HINT_RE =
-  /\b(state )?senate\b|\bhouse of representatives\b|\bstate legislature\b|\bgeneral assembly\b|\blegislature\b|\bstatutes?\b|\bgovernor'?s?( office)?\b|\brevised code\b|\badministrative code\b|\bdepartment of\b|\bstate agency\b/i;
-const LOCAL_GOV_HINT_RE =
-  /\bcity of\b|\btown of\b|\bvillage of\b|\btownship of\b|\bborough of\b|\bparish of\b|\bcity council\b|\bcounty commission\w*\b|\bcounty government\b|\bmunicipal\w*\b|\bcounty\b/i;
-
-function isLocalImplementationSource(title: string): boolean {
-  return LOCAL_GOV_HINT_RE.test(title) && !STATE_LEVEL_GOV_HINT_RE.test(title);
-}
-
 // Finer-grained authority ranking than SourceTier -- reflects how a real
 // policy researcher would actually trust these sources relative to each
-// other, not just "government vs not." Used only for ordering; confidence
-// calculation elsewhere still uses the coarser SourceTier. Checked
-// most-specific-first (crsreports.congress.gov before the general
-// congress.gov suffix, etc.).
-// Order follows the product's stated priority: official legislature
-// websites -> official government agencies -> official bill text ->
-// committee reports -> legislative fiscal notes -> government
-// implementation reports -> academic/legal analysis -> reputable nonprofit
-// policy organizations -> news (only if necessary) -> Wikipedia last. News
-// is deliberately ranked BELOW academic and nonprofit-policy sources here --
-// a wire service's summary of a bill is never preferred over the
-// legislature's own record or a nonpartisan policy analysis of it.
+// other, not just "government vs not." Used only for ordering/citation
+// preference; confidence calculation elsewhere uses the coarser SourceTier.
+// Checked most-specific-first.
+//
+// Federal priority order (exact, as specified): Congress.gov -> House.gov
+// -> Senate.gov -> Federal Register -> govinfo.gov -> SupremeCourt.gov ->
+// other federal agency (.gov). CBO/CRS/GAO are deliberately ranked in the
+// SECONDARY band below (see ANALYSIS_AGENCY_DOMAINS) -- they're official
+// and nonpartisan, but they analyze legislation rather than being the
+// legislative record itself.
 const AUTHORITY_RULES: [(host: string) => boolean, number][] = [
   [(h) => h === "congress.gov", 100],
-  [(h) => h === "crsreports.congress.gov", 98],
-  [(h) => h === "federalregister.gov", 96],
-  [(h) => h === "whitehouse.gov", 94],
-  [(h) => h === "supremecourt.gov", 92],
-  [(h) => h.endsWith(".house.gov") || h === "house.gov", 90],
-  [(h) => h.endsWith(".senate.gov") || h === "senate.gov", 90],
-  [(h) => h === "cbo.gov", 86], // legislative fiscal notes
-  [(h) => h === "gao.gov", 85], // government implementation reports
+  [(h) => h.endsWith(".house.gov") || h === "house.gov", 98],
+  [(h) => h.endsWith(".senate.gov") || h === "senate.gov", 97],
+  [(h) => h === "federalregister.gov", 95],
+  [(h) => h === "govinfo.gov", 93],
+  [(h) => h === "supremecourt.gov", 91],
 ];
+
+// State-category rank bands, applied when a .gov/.mil/.us domain doesn't
+// match one of the fixed federal domains above -- in the exact state
+// priority order requested: legislature/bill-status -> statutes/code ->
+// governor -> state agency -> state courts -> (separately, local
+// government below all of these). An unclassified official government page
+// (no recognizable category in its title) sits between state agencies and
+// local government -- still presumed a legitimate state/federal source,
+// just not confidently categorized.
+const GOV_CATEGORY_RANK: Record<GovCategory, number> = {
+  state_legislature: 87,
+  state_statutes: 85,
+  governor: 83,
+  state_agency: 81,
+  state_courts: 79,
+  unclassified: 75,
+  county: 71,
+  municipal: 69,
+};
 
 export function sourceAuthorityRank(url: string, title = ""): number {
   const bareHost = bareHostOf(url);
@@ -125,20 +188,24 @@ export function sourceAuthorityRank(url: string, title = ""): number {
   for (const [test, rank] of AUTHORITY_RULES) {
     if (test(bareHost)) return rank;
   }
-  // Any other official government domain (state legislature/governor/agency
-  // sites, or a city/county implementation page) -- ".us" is included
-  // alongside ".gov"/".mil" since several states run their official
-  // legislative sites on a "state.XX.us" pattern rather than ".gov".
   if (bareHost.endsWith(".gov") || bareHost.endsWith(".mil") || bareHost.endsWith(".us")) {
-    return isLocalImplementationSource(title) ? 68 : 80; // local implementation page vs. state/other official government
+    // ".us" is included alongside ".gov"/".mil" since several states run
+    // their official sites on a "state.XX.us" pattern rather than ".gov".
+    return GOV_CATEGORY_RANK[classifyGovSource(title)];
   }
-  if (bareHost.endsWith(".edu") || LEGAL_ANALYSIS_DOMAINS.has(bareHost)) return 65; // academic/legal analysis
-  if (REFERENCE_DOMAINS.has(bareHost)) return 55; // reputable nonprofit policy organizations
+  // Secondary tier, in the requested order: universities/government-funded
+  // research -> CBO/CRS/GAO -> Ballotpedia -> other nonprofit policy
+  // organizations -> news (only if necessary) -> private websites ->
+  // Wikipedia last.
+  if (bareHost.endsWith(".edu") || LEGAL_ANALYSIS_DOMAINS.has(bareHost)) return 62; // universities / legal analysis
+  if (ANALYSIS_AGENCY_DOMAINS.has(bareHost)) return 58; // CBO / CRS / GAO
+  if (bareHost === BALLOTPEDIA_DOMAIN) return 54; // Ballotpedia
+  if (REFERENCE_DOMAINS.has(bareHost)) return 52; // other nonprofit policy organizations
   if (WIRE_SERVICE_DOMAINS.has(bareHost)) return 45; // news -- only if necessary
   if (NATIONAL_NEWS_DOMAINS.has(bareHost)) return 40; // news -- only if necessary
   if (LOCAL_NEWS_DOMAINS.has(bareHost)) return 20; // local news
   if (isWikipedia(url)) return 5; // background only -- never outranks a real primary source
-  return 10;
+  return 10; // private websites / unclassified
 }
 
 // Shared de-duplication for any place multiple retrieval sets get merged

@@ -272,10 +272,14 @@ export interface SearchWithRetryOutcome extends SearchOutcome {
 
 // "Sufficient" for a research-grade answer means either a real official
 // source turned up, or there's enough independent corroboration that the
-// absence of one isn't immediately suspicious.
+// absence of one isn't immediately suspicious. sourceTier(url, title)
+// excludes county/municipal implementation pages from the "government"
+// bucket -- a search that only turned up a city page about a state law is
+// correctly treated as insufficient here, so the automatic broadened retry
+// actually fires instead of quietly settling for the local page.
 function hasSufficientEvidence(sources: SearchSource[] | undefined): boolean {
   if (!sources || sources.length === 0) return false;
-  return sources.some((s) => sourceTier(s.url) === "government") || sources.length >= 3;
+  return sources.some((s) => sourceTier(s.url, s.title) === "government") || sources.length >= 3;
 }
 
 // Strips parentheticals and quoted asides that can over-narrow a query

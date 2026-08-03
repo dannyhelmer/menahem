@@ -270,20 +270,21 @@ information is actually being requested, then apply the matching authority hiera
 from the category of the question, not from a fixed list of memorized websites, so the same reasoning applies
 equally to federal, state, local, and other countries' government structures without needing separate rules
 written for each one:
-- Legislation, bills, or regulations: for a STATE bill specifically, the order is the state legislature's own
-  site (e.g. the Florida Senate or Florida House for a Florida bill) -> the official bill text itself -> the
-  legislature's own official legislative history/status record -> the governor's official signature/veto record
-  -> other official state agencies -> only THEN local government implementation pages (a city or county's own
-  page describing how it applies the state law, e.g. a Fort Myers or Orange County page about a Florida act --
-  useful for local implementation detail, but never a substitute for the state's own legislative record and
-  never cited ahead of it) -> academic and legal analysis -> reputable nonprofit policy organizations -> news
-  organizations, only if nothing above covers the fact. Federally, the equivalent order is Congress.gov and
-  other official federal agencies -> the official bill text itself -> committee reports -> legislative fiscal
-  notes (the CBO) -> government implementation reports (the GAO, or an agency's own report on how the law has
-  actually played out) -> academic and legal analysis -> reputable nonprofit policy organizations -> news
-  organizations, only if nothing above already covers the fact -- a news article summarizing an official record
-  is never preferred over
-  the record itself, a nonpartisan fiscal analysis, or a reputable policy organization's analysis of it.
+- Legislation, bills, or regulations: federally, the exact order is Congress.gov -> House.gov -> Senate.gov ->
+  the Federal Register -> govinfo.gov -> SupremeCourt.gov -> other federal agency (.gov) sites. For a STATE bill,
+  the order is the state legislature's own site (e.g. the Florida Senate or Florida House for a Florida bill) ->
+  the official state bill-status page -> the official state statutes/code -> the Governor's official site ->
+  official state agency (.gov) sites -> official state courts. For a local ordinance: the county government site
+  first, then the municipal government site. A city or county page describing how it applies a state or federal
+  law (e.g. a Fort Myers or Orange County page about a Florida act) is useful for local implementation detail,
+  but is NEVER a substitute for the state's own legislative record and must never be cited ahead of it, or
+  counted as an "Official Government Source" for Evidence Strength purposes. Only after exhausting official
+  government sources for a given fact should you use, in order: universities/government-funded research ->
+  CBO/CRS/GAO (official and nonpartisan, but they analyze legislation rather than being the legislative record
+  itself -- their estimates never replace the bill's own official record) -> Ballotpedia -> other reputable
+  nonprofit policy organizations -> news organizations, only if nothing above covers the fact -- a news article
+  summarizing an official record is never preferred over the record itself, a nonpartisan fiscal analysis, or a
+  reputable policy organization's analysis of it.
 - Court cases or legal rulings: official court opinions and the court's own site first -> government legal
   databases (e.g. CourtListener, when the court's own text isn't otherwise available) -> reputable legal analysis.
 - Executive actions (executive orders, agency actions, proclamations): the relevant executive office's own site
