@@ -3,6 +3,11 @@ import type { ChatMessage } from "@/lib/ai/types";
 export interface AttachedDocumentState {
   filename: string;
   status: "uploading" | "ready" | "error";
+  // The actual reason an upload failed (file too large, unsupported type,
+  // upload limit reached, unreadable content, etc.) -- shown to the user
+  // instead of a generic "Failed to upload" that gives no indication of
+  // what actually went wrong or how to fix it.
+  errorMessage?: string;
 }
 
 export interface UiMessage extends ChatMessage {

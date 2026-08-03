@@ -113,17 +113,30 @@ export default function PromptInput({
         </div>
 
         {attachedDocument && (
-          <div className="mb-1.5 flex items-center gap-2 self-start rounded-full border border-neutral-200 bg-neutral-50 py-1 pr-1 pl-3 text-xs text-neutral-600 dark:border-neutral-800 dark:bg-neutral-800 dark:text-neutral-300">
-            <span className="max-w-[220px] truncate">
-              {attachedDocument.status === "uploading" && "Uploading "}
-              {attachedDocument.status === "error" && "Failed to upload "}
-              {attachedDocument.filename}
+          <div
+            className={`mb-1.5 flex items-center gap-2 self-start rounded-2xl border py-1 pr-1 pl-3 text-xs ${
+              attachedDocument.status === "error"
+                ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400"
+                : "border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-800 dark:bg-neutral-800 dark:text-neutral-300"
+            }`}
+          >
+            <span className="max-w-[320px]">
+              {attachedDocument.status === "uploading" && <span className="truncate">Uploading {attachedDocument.filename}</span>}
+              {attachedDocument.status === "ready" && <span className="truncate">{attachedDocument.filename}</span>}
+              {attachedDocument.status === "error" && (
+                <>
+                  <span className="block truncate font-medium">Couldn't attach {attachedDocument.filename}</span>
+                  {attachedDocument.errorMessage && (
+                    <span className="block text-red-600 dark:text-red-400">{attachedDocument.errorMessage}</span>
+                  )}
+                </>
+              )}
             </span>
             <button
               type="button"
               onClick={onClearAttachedDocument}
               aria-label="Remove attached document"
-              className="rounded-full p-0.5 text-neutral-400 hover:text-red-600"
+              className="self-start rounded-full p-0.5 text-neutral-400 hover:text-red-600"
             >
               <CloseIcon />
             </button>

@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/ai/types";
-import { deriveProjectName } from "@/lib/documents/derive-project-name";
 import { useConversationsRefresh } from "./ConversationsProvider";
 import type { AttachedDocumentState, UiMessage } from "./chat-types";
 
@@ -176,25 +175,30 @@ export function useChatSession({
   async function uploadDocument(file: File) {
     setAttachedDocument({ filename: file.name, status: "uploading" });
     try {
-      const projectRes = await fetch("/api/notebook/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: deriveProjectName(file.name) }),
-      });
-      if (!projectRes.ok) throw new Error("Failed to create project");
-      const project = (await projectRes.json()) as { id: string };
-
+      // A document attached directly in the chat composer isn't part of any
+      // Political Workspace project -- uploading with just a file (Free
+      // tier: 3/day) is a different feature from Political Workspace
+      // (Pro-only, project-based). Previously this created a hidden project
+      // first just to satisfy documents.project_id's old NOT NULL
+      // constraint, which meant every free-tier attachment 403'd on project
+      // creation before the upload itself ever ran -- see lib/db/schema.ts.
       const formData = new FormData();
-      formData.append("projectId", project.id);
       formData.append("file", file);
       const documentRes = await fetch("/api/documents", { method: "POST", body: formData });
-      if (!documentRes.ok) throw new Error("Failed to upload document");
+      if (!documentRes.ok) {
+        const body = await documentRes.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? "Upload failed. Try again.");
+      }
       const document = (await documentRes.json()) as { id: string };
 
       setDocumentId(document.id);
       setAttachedDocument({ filename: file.name, status: "ready" });
-    } catch {
-      setAttachedDocument({ filename: file.name, status: "error" });
+    } catch (err) {
+      setAttachedDocument({
+        filename: file.name,
+        status: "error",
+        errorMessage: err instanceof Error ? err.message : "Upload failed. Try again.",
+      });
     }
   }
 

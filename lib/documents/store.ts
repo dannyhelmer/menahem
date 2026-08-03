@@ -4,7 +4,7 @@ import type { StoredDocument } from "./types";
 
 interface DocumentRow {
   id: string;
-  project_id: string;
+  project_id: string | null;
   filename: string;
   size_bytes: string;
   uploaded_at: string;
@@ -60,7 +60,7 @@ export async function getDocumentFile(id: string, userId: string): Promise<Buffe
 
 export async function saveDocument(
   userId: string,
-  fields: { projectId: string; filename: string; summary: string },
+  fields: { projectId: string | null; filename: string; summary: string },
   fileBuffer: Buffer,
   text: string,
 ): Promise<StoredDocument> {

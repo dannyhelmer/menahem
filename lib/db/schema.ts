@@ -89,7 +89,7 @@ async function runMigrations(): Promise<void> {
     CREATE TABLE IF NOT EXISTS documents (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      project_id uuid NOT NULL,
+      project_id uuid,
       filename text NOT NULL,
       size_bytes bigint NOT NULL,
       summary text NOT NULL DEFAULT '',
@@ -98,6 +98,13 @@ async function runMigrations(): Promise<void> {
       uploaded_at timestamptz NOT NULL DEFAULT now()
     )
   `;
+  // project_id is nullable -- a document attached directly in the chat
+  // composer (a Free-tier feature per the pricing page) isn't part of any
+  // Political Workspace project (a Pro-only feature); it previously had to
+  // silently create a hidden project just to satisfy this NOT NULL
+  // constraint, which meant every free-tier chat attachment 403'd on
+  // project creation before the upload itself ever ran.
+  await sql`ALTER TABLE documents ALTER COLUMN project_id DROP NOT NULL`;
   await sql`CREATE INDEX IF NOT EXISTS documents_project_id_idx ON documents(project_id)`;
 
   await sql`

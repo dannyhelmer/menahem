@@ -62,12 +62,14 @@ export const GET = withAuth(async (request: Request, _ctx, user) => {
 
 export const POST = withAuth(async (request: Request, _ctx, user) => {
   const formData = await request.formData();
-  const projectId = formData.get("projectId");
+  // projectId is optional -- a document attached directly in the chat
+  // composer isn't part of any Political Workspace project (that's a
+  // separate, Pro-only feature). Only the project Document Panel sends a
+  // real projectId here.
+  const projectIdField = formData.get("projectId");
+  const projectId = typeof projectIdField === "string" && projectIdField ? projectIdField : null;
   const file = formData.get("file");
 
-  if (typeof projectId !== "string" || !projectId) {
-    return Response.json({ error: "projectId is required." }, { status: 400 });
-  }
   if (!(file instanceof File)) {
     return Response.json({ error: "A file is required." }, { status: 400 });
   }
