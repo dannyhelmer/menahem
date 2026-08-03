@@ -2,11 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireApprovedPageUser } from "@/lib/auth/session";
 import { listProjects } from "@/lib/notebook/store";
+import { PAGE_SEO } from "@/lib/seo/constants";
 import CreateProjectForm from "@/app/_components/CreateProjectForm";
 import ProjectListItem from "@/app/_components/ProjectListItem";
 
+// Personalized workspace -- inherits (app)/layout.tsx's blanket noindex;
+// this description is only for the browser tab, never a search snippet.
 export const metadata: Metadata = {
-  title: "Political Workspace",
+  title: PAGE_SEO.workspace.title,
+  description: PAGE_SEO.workspace.description,
 };
 
 export default async function WorkspacePage() {

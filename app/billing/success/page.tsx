@@ -2,10 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { CheckCircle } from "lucide-react";
 
+// Transactional, post-checkout confirmation page -- only ever reached via a
+// Stripe redirect after a real purchase, so it has no search value and
+// should never be indexed.
 export const metadata: Metadata = {
   title: "Subscription Activated",
   description: "Your Menahem Pro subscription is being activated.",
   alternates: { canonical: "/billing/success" },
+  robots: { index: false, follow: false },
 };
 
 export default function BillingSuccessPage() {

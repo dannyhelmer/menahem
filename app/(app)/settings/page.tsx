@@ -2,14 +2,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireApprovedPageUser } from "@/lib/auth/session";
 import { getOwnerProfile } from "@/lib/settings/owner-profile";
+import { PAGE_SEO } from "@/lib/seo/constants";
 import AccountSection from "./_components/AccountSection";
 import AiProviderStatusSection from "./_components/AiProviderStatusSection";
 import GovernmentSourcesSection from "./_components/GovernmentSourcesSection";
 import SearchProvidersSection from "./_components/SearchProvidersSection";
 import ThemeSection from "./_components/ThemeSection";
 
+// Personalized account page -- inherits (app)/layout.tsx's blanket noindex;
+// this description is only for the browser tab, never a search snippet.
 export const metadata: Metadata = {
-  title: "Settings",
+  title: PAGE_SEO.settings.title,
+  description: PAGE_SEO.settings.description,
 };
 
 function SettingsCard({ title, children }: { title: string; children: React.ReactNode }) {

@@ -18,6 +18,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // show the "what should we call you" prompt, not a security check.
   const user = await getSessionUser();
 
+  // "/" is the one route in this group reachable while logged out (see
+  // proxy.ts) -- it renders a public marketing page for that case (see
+  // app/(app)/page.tsx). That page must never be wrapped in the
+  // authenticated app's Sidebar/chrome, which would both look broken (every
+  // nav link bounces a guest straight to /signup) and defeat the point of a
+  // plain, crawlable marketing page. Every other page under this layout
+  // still requires a session to be reached at all, so this only ever
+  // changes behavior for a signed-out visit to "/".
+  if (!user) return <>{children}</>;
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white dark:bg-neutral-950">
       <Sidebar />
@@ -25,7 +35,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           only needed below md, where that bar is fixed/out-of-flow and
           would otherwise overlap the first ~56px of page content. */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden pt-14 md:pt-0">{children}</div>
-      {user && !user.preferredName && <ProfileOnboarding />}
+      {!user.preferredName && <ProfileOnboarding />}
     </div>
   );
 }

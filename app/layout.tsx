@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ConversationsProvider } from "./_components/ConversationsProvider";
+import JsonLd from "./_components/JsonLd";
 import ThemeSync from "./_components/ThemeSync";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/theme";
-import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/seo/constants";
+import { SITE_DESCRIPTION, SITE_KEYWORDS, SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/seo/constants";
+import { buildOrganizationJsonLd, buildSoftwareApplicationJsonLd, buildWebsiteJsonLd } from "@/lib/seo/structured-data";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,6 +25,7 @@ export const metadata: Metadata = {
     template: `%s | ${SITE_NAME}`,
   },
   description: SITE_DESCRIPTION,
+  keywords: SITE_KEYWORDS,
   alternates: {
     canonical: "/",
   },
@@ -57,6 +60,9 @@ export default function RootLayout({
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <JsonLd data={buildOrganizationJsonLd()} />
+        <JsonLd data={buildWebsiteJsonLd()} />
+        <JsonLd data={buildSoftwareApplicationJsonLd()} />
       </head>
       <body className="min-h-full flex flex-col">
         <ThemeSync />

@@ -4,8 +4,10 @@ import { requireAdminPageUser } from "@/lib/auth/session";
 import { listUsers } from "@/lib/auth/users";
 import AdminDashboard from "@/app/_components/AdminDashboard";
 
+// Internal admin-only page -- inherits (app)/layout.tsx's blanket noindex.
 export const metadata: Metadata = {
   title: "Admin",
+  description: "Manage Menahem private beta accounts and access.",
 };
 
 export default async function AdminPage() {

@@ -1,10 +1,17 @@
 import type { Metadata } from "next";
 import LegalPageLayout, { LegalSection } from "@/app/_components/LegalPageLayout";
 
+const title = "Privacy Policy";
+const description = "How Menahem collects, uses, and protects your account and research information.";
+
 export const metadata: Metadata = {
-  title: "Privacy Policy",
-  description: "How Menahem collects, uses, and protects your account and research information.",
+  title,
+  description,
+  keywords: ["Menahem privacy policy", "data protection", "government research platform privacy"],
   alternates: { canonical: "/privacy" },
+  robots: { index: true, follow: true },
+  openGraph: { title, description, url: "/privacy", type: "website" },
+  twitter: { card: "summary_large_image", title, description },
 };
 
 export default function PrivacyPolicyPage() {

@@ -1,10 +1,17 @@
 import type { Metadata } from "next";
 import LegalPageLayout, { LegalSection } from "@/app/_components/LegalPageLayout";
 
+const title = "Terms of Service";
+const description = "The terms governing use of Menahem's private beta.";
+
 export const metadata: Metadata = {
-  title: "Terms of Service",
-  description: "The terms governing use of Menahem's private beta.",
+  title,
+  description,
+  keywords: ["Menahem terms of service", "government research platform terms"],
   alternates: { canonical: "/terms" },
+  robots: { index: true, follow: true },
+  openGraph: { title, description, url: "/terms", type: "website" },
+  twitter: { card: "summary_large_image", title, description },
 };
 
 export default function TermsOfServicePage() {

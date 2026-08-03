@@ -1,11 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import LegalPageLayout, { LegalSection } from "@/app/_components/LegalPageLayout";
+import { PAGE_SEO } from "@/lib/seo/constants";
+
+const { title, description } = PAGE_SEO.about;
 
 export const metadata: Metadata = {
-  title: "About Menahem",
-  description: "What Menahem is, what it can do, and how it approaches government research.",
+  title,
+  description,
+  keywords: ["about Menahem", "government research platform", "AI policy research", "legislative analysis tool"],
   alternates: { canonical: "/about" },
+  robots: { index: true, follow: true },
+  openGraph: { title, description, url: "/about", type: "website" },
+  twitter: { card: "summary_large_image", title, description },
 };
 
 export default function AboutPage() {
