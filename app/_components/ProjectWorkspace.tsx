@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 import ConfirmDialog from "./ConfirmDialog";
 import DocumentPanel from "./DocumentPanel";
 import DocumentUpload from "./DocumentUpload";
+import ProjectChat from "./ProjectChat";
 import type { StoredDocument } from "@/lib/documents/types";
 import type { GraphEntity } from "@/lib/graph/types";
 import { humanize } from "@/lib/graph/humanize";
@@ -251,6 +252,15 @@ export default function ProjectWorkspace({
               ))}
             </div>
           )}
+        </section>
+
+        <section className="mb-10">
+          <SectionHeading>Chat with this Workspace</SectionHeading>
+          <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
+            Ask a question and Menahem automatically searches every document saved in this workspace -- no need
+            to attach or re-upload anything individually.
+          </p>
+          <ProjectChat projectId={project.id} />
         </section>
 
         <section className="mb-10">

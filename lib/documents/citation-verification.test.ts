@@ -1,16 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { verifyDocumentCitations, type DocumentCitationContext } from "./citation-verification";
+import { mergeDocumentCitationContexts, verifyDocumentCitations, type DocumentCitationContext } from "./citation-verification";
 
 const paginatedContext: DocumentCitationContext = {
   filename: "budget.pdf",
-  paginated: true,
   shownPages: new Set([1, 2, 3]),
   shownLineRanges: [],
 };
 
 const lineContext: DocumentCitationContext = {
   filename: "notes.txt",
-  paginated: false,
   shownPages: new Set(),
   shownLineRanges: [
     { start: 1, end: 50 },
@@ -59,6 +57,15 @@ describe("verifyDocumentCitations (paginated documents)", () => {
     const issues = verifyDocumentCitations("The budget increased significantly this year.", paginatedContext);
     expect(issues).toEqual([]);
   });
+
+  it("flags a line citation for a document with no shown line ranges at all", () => {
+    // paginatedContext has an empty shownLineRanges -- any line citation
+    // against it is unverifiable by construction, and should be caught,
+    // not silently ignored the way an earlier "paginated" flag used to.
+    const issues = verifyDocumentCitations("See lines 10-20 for details.", paginatedContext);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].type).toBe("unverified_line");
+  });
 });
 
 describe("verifyDocumentCitations (non-paginated documents)", () => {
@@ -80,8 +87,44 @@ describe("verifyDocumentCitations (non-paginated documents)", () => {
     expect(issues).toHaveLength(1);
   });
 
-  it("never flags a page citation for a non-paginated document (page checks are skipped entirely)", () => {
+  it("flags a page citation for a document with no shown pages at all", () => {
+    // lineContext has an empty shownPages -- a page citation against it is
+    // unverifiable by construction. This is a real improvement over the
+    // earlier design: previously page checks were skipped entirely for a
+    // non-paginated document, which meant a hallucinated page citation for
+    // a DOCX/TXT/MD file was never caught at all.
     const issues = verifyDocumentCitations("See page 5 for details.", lineContext);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].type).toBe("unverified_page");
+  });
+});
+
+describe("mergeDocumentCitationContexts (Phase 5: workspace-wide)", () => {
+  it("returns null for an empty list", () => {
+    expect(mergeDocumentCitationContexts([], "the workspace's documents")).toBeNull();
+  });
+
+  it("unions shown pages and line ranges across multiple documents", () => {
+    const merged = mergeDocumentCitationContexts([paginatedContext, lineContext], "the workspace's documents");
+    expect(merged).not.toBeNull();
+    expect(merged!.shownPages).toEqual(new Set([1, 2, 3]));
+    expect(merged!.shownLineRanges).toEqual([
+      { start: 1, end: 50 },
+      { start: 200, end: 250 },
+    ]);
+  });
+
+  it("verifies citations correctly against the merged, multi-document context", () => {
+    const merged = mergeDocumentCitationContexts([paginatedContext, lineContext], "the workspace's documents")!;
+    // page 2 was shown (via paginatedContext) and lines 10-20 were shown
+    // (via lineContext) -- both should verify cleanly against the merge.
+    const issues = verifyDocumentCitations("See page 2 and lines 10-20 for details.", merged);
     expect(issues).toEqual([]);
+  });
+
+  it("still flags a citation unverifiable against every merged document", () => {
+    const merged = mergeDocumentCitationContexts([paginatedContext, lineContext], "the workspace's documents")!;
+    const issues = verifyDocumentCitations("See page 999 for details.", merged);
+    expect(issues).toHaveLength(1);
   });
 });

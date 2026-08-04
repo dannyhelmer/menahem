@@ -24,10 +24,14 @@ import { buildLearningModeGuidance, detectLearningMode } from "@/lib/intelligenc
 import { classifyPoliticalIntents, isPoliticalQuestion, type PoliticalIntent } from "@/lib/intelligence/political-intent";
 import { requiresLiveData, VERIFICATION_FAILED_MESSAGE } from "@/lib/intelligence/requires-live-data";
 import { CATEGORY_LABELS, classify } from "@/lib/intelligence/task-classifier";
-import { getDocument, getDocumentPages, getDocumentText } from "@/lib/documents/store";
+import { getDocument, getDocumentPages, getDocumentText, listDocuments } from "@/lib/documents/store";
 import type { DocumentPage, StoredDocument } from "@/lib/documents/types";
 import { retrieveRelevantChunks, type RetrievalResult, type RetrievedChunk } from "@/lib/documents/retrieval";
-import { verifyDocumentCitations, type DocumentCitationContext } from "@/lib/documents/citation-verification";
+import {
+  mergeDocumentCitationContexts,
+  verifyDocumentCitations,
+  type DocumentCitationContext,
+} from "@/lib/documents/citation-verification";
 import { extractFinancialLineItems } from "@/lib/documents/budget-extract";
 import { getFinancialLineItems, hasAttemptedFinancialExtraction, saveFinancialLineItems } from "@/lib/documents/budget-store";
 import { computeBudgetAnalysis, type BudgetAnalysis } from "@/lib/documents/budget-analysis";
@@ -214,7 +218,7 @@ async function buildDocumentContext(
       : buildLineNumberedDocumentContext(document, pages);
   }
 
-  const result = await retrieveRelevantChunks(documentId, userId, query);
+  const result = await retrieveRelevantChunks({ type: "document", documentId }, userId, query);
   return buildRetrievedDocumentContext(document, result);
 }
 
@@ -225,13 +229,19 @@ async function buildDocumentContext(
 // real page/line boundaries -- so it's exactly as trustworthy as the
 // whole-document path's locators, just narrower in scope.
 function buildRetrievedDocumentContext(document: StoredDocument, result: RetrievalResult): DocumentContextResult {
+  // Chunks from a non-paginated document all carry pageNumber 1 (the
+  // single document_pages row that format gets stored as -- see
+  // chunk.ts) -- shownPages must stay empty for those, or a "page 1"
+  // citation would wrongly validate for a document that should never be
+  // cited by page at all.
   const citationCheck: DocumentCitationContext = {
     filename: document.filename,
-    paginated: document.paginated,
-    shownPages: new Set(result.chunks.map((chunk) => chunk.pageNumber)),
-    shownLineRanges: result.chunks
-      .filter((chunk): chunk is RetrievedChunk & { lineStart: number; lineEnd: number } => chunk.lineStart !== null)
-      .map((chunk) => ({ start: chunk.lineStart, end: chunk.lineEnd })),
+    shownPages: document.paginated ? new Set(result.chunks.map((chunk) => chunk.pageNumber)) : new Set(),
+    shownLineRanges: document.paginated
+      ? []
+      : result.chunks
+          .filter((chunk): chunk is RetrievedChunk & { lineStart: number; lineEnd: number } => chunk.lineStart !== null)
+          .map((chunk) => ({ start: chunk.lineStart, end: chunk.lineEnd })),
   };
 
   if (result.chunks.length === 0) {
@@ -329,7 +339,6 @@ function buildPaginatedDocumentContext(document: StoredDocument, pages: Document
     text,
     citationCheck: {
       filename: document.filename,
-      paginated: true,
       shownPages: new Set(included.map((page) => page.pageNumber)),
       shownLineRanges: [],
     },
@@ -380,7 +389,6 @@ function buildLineNumberedDocumentContext(document: StoredDocument, pages: Docum
     text,
     citationCheck: {
       filename: document.filename,
-      paginated: false,
       shownPages: new Set(),
       shownLineRanges: includedLineCount > 0 ? [{ start: 1, end: includedLineCount }] : [],
     },
@@ -490,6 +498,97 @@ async function buildBudgetAnalysisContext(documentId: string, userId: string): P
   );
 
   return { text: lines.join("\n"), analysis };
+}
+
+// Document Intelligence Phase 5: "AI reads saved workspace contents
+// automatically" -- when a conversation is happening inside a Political
+// Workspace project and no single document was explicitly attached to
+// this message, every document saved in that project is automatically
+// available as context, retrieved dynamically (never loaded wholesale --
+// an explicit Phase 5 requirement, since concatenating N whole documents
+// would blow through the context budget the moment a workspace has more
+// than a couple of files, exactly the problem Phase 2 already solved for
+// one document). Built directly on Phase 2's retrieval layer via
+// RetrievalScope's "workspace" case -- no new retrieval mechanism, just a
+// wider scope for the existing one.
+async function buildWorkspaceDocumentContext(
+  projectId: string,
+  userId: string,
+  query: string,
+): Promise<DocumentContextResult | null> {
+  const documents = await listDocuments(projectId, userId);
+  if (documents.length === 0) return null;
+
+  const documentNames = documents.map((d) => d.filename).join(", ");
+  const result = await retrieveRelevantChunks({ type: "workspace", projectId }, userId, query);
+
+  if (result.chunks.length === 0) {
+    return {
+      text:
+        `This workspace contains ${documents.length} document(s) (${documentNames}), but no passages relevant ` +
+        "to this specific question were found via search across them. Say plainly that you couldn't find " +
+        "anything relevant in the workspace's documents for this question -- do not answer from general " +
+        "knowledge as if it came from one of them.",
+      citationCheck: null,
+    };
+  }
+
+  const locatorLabel = (chunk: RetrievedChunk) =>
+    chunk.paginated
+      ? `${chunk.filename}, Page ${chunk.pageNumber}`
+      : chunk.lineStart !== null
+        ? `${chunk.filename}, Lines ${chunk.lineStart}-${chunk.lineEnd}`
+        : chunk.filename;
+
+  const body = result.chunks.map((chunk) => `--- ${locatorLabel(chunk)} ---\n${chunk.text}`).join("\n\n");
+
+  const modeNote =
+    result.mode === "exact"
+      ? "These are ALL the passages across this workspace's documents that literally match the search term -- " +
+        "if the user asked for every mention/instance of something, this is the complete set of matches across " +
+        "every document, not a sample."
+      : "These are the passages retrieved as most relevant to this specific question across this workspace's " +
+        "documents -- not the full contents of any of them. If what the user is asking about isn't actually " +
+        "covered by what's shown below, say plainly that you couldn't find it rather than guessing.";
+
+  const text = [
+    `This Political Workspace contains ${documents.length} document(s): ${documentNames}. The following ` +
+      "excerpts were automatically retrieved from across them for this specific question -- you never need the " +
+      "user to manually attach or re-upload a document; every document saved in this workspace is available " +
+      "context automatically. Use ONLY the content below to answer. Multiple documents are in play, so ALWAYS " +
+      "name the specific filename alongside any page or line citation (e.g. \"page 12 of budget.pdf\", not just " +
+      "\"page 12\") -- NEVER invent, estimate, or guess a locator, or attribute one to the wrong file; only " +
+      "cite exactly what's shown in a marker below.",
+    modeNote,
+    body,
+  ].join("\n\n");
+
+  // One DocumentCitationContext per document actually shown, then merged --
+  // the mechanical checker doesn't attribute a citation to a specific file
+  // (see mergeDocumentCitationContexts), so this catches "cited a locator
+  // never shown for ANY document this turn" rather than "right locator,
+  // wrong file" specifically, which would need per-citation filename
+  // parsing this project doesn't do.
+  const byDocument = new Map<string, RetrievedChunk[]>();
+  for (const chunk of result.chunks) {
+    const list = byDocument.get(chunk.filename) ?? [];
+    list.push(chunk);
+    byDocument.set(chunk.filename, list);
+  }
+  const perDocumentContexts: DocumentCitationContext[] = Array.from(byDocument.entries()).map(([filename, chunks]) => {
+    const paginated = chunks[0]?.paginated ?? false;
+    return {
+      filename,
+      shownPages: paginated ? new Set(chunks.map((chunk) => chunk.pageNumber)) : new Set(),
+      shownLineRanges: paginated
+        ? []
+        : chunks
+            .filter((chunk): chunk is RetrievedChunk & { lineStart: number; lineEnd: number } => chunk.lineStart !== null)
+            .map((chunk) => ({ start: chunk.lineStart, end: chunk.lineEnd })),
+    };
+  });
+
+  return { text, citationCheck: mergeDocumentCitationContexts(perDocumentContexts, "the workspace's documents") };
 }
 
 // Deterministic (no LLM call) resolution of a short jurisdiction reply
@@ -607,7 +706,19 @@ async function routeMessage(
   // already query-resolved (resolveFollowupTopic above) -- the right thing
   // to hand to document retrieval too, so a short follow-up like "what
   // about the transportation section?" retrieves against its expanded form.
-  const documentContext = documentId ? await buildDocumentContext(documentId, userId, text) : null;
+  // A single explicitly-attached document takes precedence over a
+  // workspace's automatic context when both are present -- attaching one
+  // specific document to a message is a more deliberate signal than just
+  // being inside a project generally (Document Intelligence Phase 5: when
+  // no specific document is attached but this conversation is happening
+  // inside a Political Workspace project, every document saved in that
+  // project becomes available context automatically, retrieved the same
+  // dynamic way rather than loaded wholesale).
+  const documentContext = documentId
+    ? await buildDocumentContext(documentId, userId, text)
+    : projectId
+      ? await buildWorkspaceDocumentContext(projectId, userId, text)
+      : null;
   if (documentContext) liveDataParts.push(documentContext.text);
 
   // Document Intelligence Phase 4: a budget-statistics question against an
@@ -1248,10 +1359,13 @@ export const POST = withAuth(async (request, _ctx, user) => {
               `[document-citations] unverified citations for "${documentCitationCheck.filename}": ` +
                 citationIssues.map((i) => `${i.type}: ${i.detail}`).join("; "),
             );
+            const hasPageIssue = citationIssues.some((i) => i.type === "unverified_page");
+            const hasLineIssue = citationIssues.some((i) => i.type === "unverified_line");
+            const locatorWord = hasPageIssue && hasLineIssue ? "page or line" : hasPageIssue ? "page" : "line";
             const notice =
-              `\n\nNote: this response cited a ${documentCitationCheck.paginated ? "page" : "line"} number for ` +
-              `"${documentCitationCheck.filename}" that could not be mechanically verified against what was ` +
-              "actually retrieved for this question -- treat that specific citation with caution.";
+              `\n\nNote: this response cited a ${locatorWord} number for "${documentCitationCheck.filename}" ` +
+              "that could not be mechanically verified against what was actually retrieved for this question -- " +
+              "treat that specific citation with caution.";
             if (!assistantText.includes(notice.trim())) {
               assistantText = assistantText.trimEnd() + notice;
             }

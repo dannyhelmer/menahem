@@ -143,6 +143,7 @@ export function useChatSession({
   initialMessages,
   category,
   initialDocumentId,
+  initialProjectId,
 }: {
   initialSessionId?: string;
   initialMessages?: UiMessage[];
@@ -152,6 +153,14 @@ export function useChatSession({
   // upload flow below, which lets the document attached to a message
   // change turn to turn.
   initialDocumentId?: string;
+  // Document Intelligence Phase 5: a fixed Political Workspace project for
+  // the whole session (ProjectChat's embedded per-project panel) -- sent
+  // with every message so the server automatically retrieves relevant
+  // content across every document saved in that project, with no
+  // per-message attachment needed. Never changes mid-session (there's no
+  // UI to reassign a session to a different project), so it's a plain
+  // constant, not state.
+  initialProjectId?: string;
 }) {
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages ?? []);
   const [status, setStatus] = useState<"idle" | "streaming">("idle");
@@ -324,6 +333,7 @@ export function useChatSession({
           deepResearchEnabled: deepResearchRequested,
           category,
           documentId: documentIdForThisMessage,
+          projectId: initialProjectId,
         }),
       });
 
