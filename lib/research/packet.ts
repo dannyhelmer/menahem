@@ -35,8 +35,15 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "as if it were the official record -- open the response with exactly this line: \"Official legislative " +
   "source could not be retrieved.\", then continue only with whatever can be honestly supported by whatever " +
   "secondary sources exist, clearly marked as secondary throughout and never presented as a substitute for the " +
-  "missing official record. Structure the answer neutrally as a standardized bill header followed by a fixed " +
-  "set of sections.\n\n" +
+  "missing official record. If NOTHING retrieved -- official or secondary -- actually describes this specific " +
+  "bill (for example, the bill name or number doesn't match anything in the retrieved data at all), do not " +
+  "write an Overview, Legislative History, or any other section describing what the bill supposedly does based " +
+  "only on its title or number -- that is inventing legislative content, not reporting it. Instead, state " +
+  "plainly that no information about this specific bill could be found in retrieved sources, and stop there " +
+  "(you may still fill in header fields you can genuinely confirm, such as the bill number and jurisdiction " +
+  "exactly as the user stated them, using the standard \"Official records reviewed did not provide this " +
+  "information.\" line -- never \"N/A\" -- for everything else). Structure the answer neutrally as a " +
+  "standardized bill header followed by a fixed set of sections.\n\n" +
   "Standardized header, as its own labeled lines at the top, one per line, every time a specific bill is being " +
   "discussed, in this exact order every time -- a reader should be able to find the same fact in the same place " +
   "across different answers: \"**Official Title:**\" (the formal legal text), \"**Common Name:**\" (only if a " +
