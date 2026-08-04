@@ -9,6 +9,8 @@ export interface ComparisonPacket {
   sources: TieredSource[];
   confidence: "high" | "medium" | "low";
   confidenceReason: string;
+  retrievalFailed: boolean;
+  retrievalFailureReason?: string;
 }
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
@@ -34,6 +36,16 @@ export async function buildComparisonPacket(
   const confidenceReason =
     `Overall confidence reflects the weaker-evidenced side of this comparison. ${weakerPacket.confidenceReason}`;
 
+  // A comparison is only as good as its weaker side -- if EITHER subject
+  // had a genuine double retrieval failure (no official source, and a
+  // broadened secondary search also came up short), the whole comparison
+  // is compromised, not just that one side.
+  const retrievalFailed = packetA.retrievalFailed || packetB.retrievalFailed;
+  const retrievalFailureReason = retrievalFailed
+    ? (packetA.retrievalFailed ? packetA.retrievalFailureReason : packetB.retrievalFailureReason) ??
+      "Retrieval failed for at least one side of this comparison, even after a broadened secondary-source search."
+    : undefined;
+
   const liveData = [
     `Side-by-side comparison packet: "${targets.a}" vs "${targets.b}". Treat these as two separate subjects -- ` +
       "never blend facts between them, and only cite a subject's own sources for claims about that subject.",
@@ -48,5 +60,7 @@ export async function buildComparisonPacket(
     sources: sortByAuthority(dedupeByUrl([...packetA.sources, ...packetB.sources])),
     confidence,
     confidenceReason,
+    retrievalFailed,
+    retrievalFailureReason,
   };
 }

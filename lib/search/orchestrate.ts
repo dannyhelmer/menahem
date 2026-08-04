@@ -2,6 +2,13 @@ import { fetchPageText } from "./fetch";
 import { getConfiguredProviders } from "./registry";
 import type { SearchProvider, SearchResult } from "./types";
 import { sourceAuthorityRank, sourceTier } from "@/lib/research/source-tier";
+import {
+  recordFetchFailure,
+  recordFetchSuccess,
+  recordRawResults,
+  recordSearchQuery,
+  type RetrievalDiagnostics,
+} from "./retrieval-diagnostics";
 
 const MAX_PAGES_TO_FETCH = 8;
 // Per-source fetches run in parallel (see below), so this bounds total
@@ -77,10 +84,16 @@ export interface SearchProgressUpdate {
 export async function runSearchForMessage(
   query: string,
   maxResults = 5,
-  options?: { preferRecent?: boolean; onProgress?: (update: SearchProgressUpdate) => void },
+  options?: {
+    preferRecent?: boolean;
+    onProgress?: (update: SearchProgressUpdate) => void;
+    diagnostics?: RetrievalDiagnostics;
+    diagnosticsPhase?: string;
+  },
 ): Promise<SearchOutcome> {
   const onProgress = options?.onProgress ?? (() => {});
   console.log(`[orchestrate] raw search query: "${query}" (maxResults=${maxResults}, preferRecent=${Boolean(options?.preferRecent)})`);
+  recordSearchQuery(options?.diagnostics, options?.diagnosticsPhase ?? "search", query);
   const providers = await getConfiguredProviders();
   if (providers.length === 0) {
     console.log("[orchestrate] no search provider configured");
@@ -141,6 +154,8 @@ export async function runSearchForMessage(
     }
   }
 
+  recordRawResults(options?.diagnostics, results);
+
   // Social-media posts are essentially never a citable source for a
   // government-research platform (no editorial process, easily spoofed,
   // often just someone reacting to the actual news) -- excluded entirely
@@ -166,9 +181,11 @@ export async function runSearchForMessage(
     const { text, error } = await fetchPageText(candidate.url);
     if (text) {
       onProgress({ label: `✓ ${friendlySourceName(candidate.url)}` });
+      recordFetchSuccess(options?.diagnostics, candidate.url, candidate.title);
       return { title: candidate.title, url: candidate.url, text };
     }
     console.log(`[orchestrate] couldn't extract page text for ${candidate.url}: ${error}`);
+    recordFetchFailure(options?.diagnostics, candidate.url, error ?? "unknown error");
     return null;
   };
 
@@ -334,12 +351,20 @@ export interface PreferOfficial {
 export async function runSearchWithRetry(
   query: string,
   maxResults = 5,
-  options?: { preferRecent?: boolean; preferOfficial?: PreferOfficial; onProgress?: (update: SearchProgressUpdate) => void },
+  options?: {
+    preferRecent?: boolean;
+    preferOfficial?: PreferOfficial;
+    onProgress?: (update: SearchProgressUpdate) => void;
+    diagnostics?: RetrievalDiagnostics;
+  },
 ): Promise<SearchWithRetryOutcome> {
   const firstQuery = options?.preferOfficial
     ? officialDomainQuery(query, options.preferOfficial.domains)
     : query;
-  const first = await runSearchForMessage(firstQuery, maxResults, options);
+  const first = await runSearchForMessage(firstQuery, maxResults, {
+    ...options,
+    diagnosticsPhase: options?.preferOfficial ? "official (phase 1)" : "search",
+  });
 
   if (hasSufficientEvidence(first.sources)) {
     return { ...first, retried: false, stillWeak: false };
@@ -371,7 +396,10 @@ export async function runSearchWithRetry(
   const retry =
     !options?.preferOfficial && broadenedQuery.toLowerCase() === firstQuery.toLowerCase()
       ? first
-      : await runSearchForMessage(broadenedQuery, Math.max(maxResults, 8), options);
+      : await runSearchForMessage(broadenedQuery, Math.max(maxResults, 8), {
+          ...options,
+          diagnosticsPhase: options?.preferOfficial ? "secondary (phase 2)" : "broadened retry",
+        });
 
   // preferOfficial: phase-1 (official) sources are listed first -- they're
   // the preferred citations per the requested source priority. Otherwise

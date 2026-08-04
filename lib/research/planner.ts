@@ -181,5 +181,21 @@ export async function buildPlannedResearchPacket(
     `(confidence reflects that proportion, not just the weakest section). ` +
     buildConfidenceReason(confidence, sources, confidence === "high");
 
-  return { intents: Array.from(intents), jurisdiction, state, sources, liveData, confidence, confidenceReason };
+  // Not used to hard-gate generation here -- the multi-part planner path is
+  // deliberately exempted from skipModel (see app/api/chat/route.ts: "Never
+  // skip generation for the multi-part path -- graceful degradation...").
+  // Computed anyway so this ResearchPacket is honest about the field, and
+  // so a future caller that DOES want the aggregate signal has it available.
+  const retrievalFailed = settled.every((result) => result.status !== "fulfilled" || result.value.retrievalFailed);
+
+  return {
+    intents: Array.from(intents),
+    jurisdiction,
+    state,
+    sources,
+    liveData,
+    confidence,
+    confidenceReason,
+    retrievalFailed,
+  };
 }

@@ -4,8 +4,13 @@
 // must be hard-gated (the model call skipped entirely), not just asked
 // nicely to hedge -- this project's own testing showed a soft instruction
 // alone doesn't reliably stop fabrication.
+// "status of the bill"/"bill status" alone missed the far more common real
+// phrasing of naming the actual bill ("status of Illinois HB 4200", "status
+// of H.R. 1") -- status-of-X-followed-by-a-number within a short span
+// catches that without needing to replicate every bill-number-token variant
+// political-intent.ts already enumerates for classification purposes.
 const REQUIRES_LIVE_DATA_RE =
-  /\b(who(?:'s|\s+is)\s+running|running (?:for|against)|candidates?|campaign finance|campaign contribution\w*|donor\w*|donat\w*|pac (?:money|contribution\w*|donation\w*)|election result\w*|who won|poll(?:ing|s)?\b|filing deadline\w*|bill status|status of (?:the |this )?bill|who is (?:the )?current\w*|current(?:ly)? (?:the )?(?:senator|representative|governor|mayor|congress(?:man|woman|person)?))\b/i;
+  /\b(who(?:'s|\s+is)\s+running|running (?:for|against)|candidates?|campaign finance|campaign contribution\w*|donor\w*|donat\w*|pac (?:money|contribution\w*|donation\w*)|election result\w*|who won|poll(?:ing|s)?\b|filing deadline\w*|bill status|status of (?:the |this )?bill|status of [^?!]{0,50}?\d|who is (?:the )?current\w*|current(?:ly)? (?:the )?(?:senator|representative|governor|mayor|congress(?:man|woman|person)?))\b/i;
 
 export function requiresLiveData(text: string): boolean {
   return REQUIRES_LIVE_DATA_RE.test(text);

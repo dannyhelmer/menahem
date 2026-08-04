@@ -105,5 +105,27 @@ export async function runDeepResearch(
     `Based on ${subquestions.length} independently researched sub-question(s). ` +
     buildConfidenceReason(confidence, sources, confidence === "high");
 
-  return { intents: Array.from(intents), jurisdiction, state, sources, liveData, confidence, confidenceReason };
+  // Deep Research aggregates multiple independently-researched sub-questions
+  // and already reports the BEST confidence across them (see CONFIDENCE_RANK
+  // reduce above) -- retrievalFailed mirrors that same "best of" philosophy:
+  // only a genuine failure across EVERY sub-question counts as an overall
+  // retrieval failure, not just one weak sub-question dragging down an
+  // otherwise well-evidenced report.
+  const retrievalFailed = packets.every((packet) => packet.retrievalFailed);
+  const retrievalFailureReason = retrievalFailed
+    ? "None of the independently researched sub-questions found sufficient official or corroborated evidence, " +
+      "even after each was automatically retried with a broadened secondary-source search."
+    : undefined;
+
+  return {
+    intents: Array.from(intents),
+    jurisdiction,
+    state,
+    sources,
+    liveData,
+    confidence,
+    confidenceReason,
+    retrievalFailed,
+    retrievalFailureReason,
+  };
 }

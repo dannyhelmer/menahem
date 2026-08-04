@@ -859,7 +859,15 @@ async function routeMessage(
       confidence: packet.confidence,
       confidenceReason: packet.confidenceReason,
       followups: buildFollowupSuggestions(politicalIntents),
-      skipModel: requiresLiveData(text) && packet.confidence === "low",
+      // Hard-stop generation only for the narrow, deliberately-scoped set of
+      // high-stakes claim shapes (requiresLiveData) AND only when retrieval
+      // genuinely failed on both legs (no official source, and a broadened
+      // secondary-source search also came up short) -- see retrievalFailed's
+      // doc comment on ResearchPacket. A secondary-source-only answer that
+      // found enough corroboration still gets a normal, appropriately
+      // hedged response instead of a hard failure.
+      skipModel: requiresLiveData(text) && packet.retrievalFailed,
+      skipModelMessage: packet.retrievalFailureReason,
       maxTokens: DEEP_RESEARCH_MAX_TOKENS,
       grounded: true,
       resolvedUserText: text,
@@ -886,7 +894,8 @@ async function routeMessage(
         confidence: packet.confidence,
         confidenceReason: packet.confidenceReason,
         followups: buildFollowupSuggestions(politicalIntents),
-        skipModel: requiresLiveData(text) && packet.confidence === "low",
+        skipModel: requiresLiveData(text) && packet.retrievalFailed,
+        skipModelMessage: packet.retrievalFailureReason,
         grounded: true,
         resolvedUserText: text,
         documentCitationCheck: documentContext?.citationCheck ?? null,
@@ -932,7 +941,8 @@ async function routeMessage(
       // degradation means writing the sections that DO have evidence even
       // when the overall/weakest confidence is low, not refusing the whole
       // response the way a single-topic low-confidence answer would.
-      skipModel: !isMultiPart && requiresLiveData(text) && packet.confidence === "low",
+      skipModel: !isMultiPart && requiresLiveData(text) && packet.retrievalFailed,
+      skipModelMessage: packet.retrievalFailureReason,
       grounded: true,
       resolvedUserText: text,
       documentCitationCheck: documentContext?.citationCheck ?? null,

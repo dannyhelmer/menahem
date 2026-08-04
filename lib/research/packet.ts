@@ -6,6 +6,12 @@ import { getConnectedEntities } from "@/lib/graph/store";
 import { getTimeline } from "@/lib/timeline/store";
 import { runSearchWithRetry } from "@/lib/search/orchestrate";
 import { isSpecificRoute, selectOfficialDomains } from "@/lib/search/source-router";
+import {
+  maybeCreateRetrievalDiagnostics,
+  printRetrievalDiagnostics,
+  recordDocumentsProvided,
+  recordRouterInvocation,
+} from "@/lib/search/retrieval-diagnostics";
 import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
 import { dedupeByUrl, sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
 
@@ -313,6 +319,20 @@ export interface ResearchPacket {
   liveData: string;
   confidence: "high" | "medium" | "low";
   confidenceReason: string;
+  // True only when BOTH legs of retrieval came up short: no direct
+  // gov-data-provider hit (Congress.gov/FEC), AND the two-phase web search
+  // (official domains first, then a genuinely broadened secondary-source
+  // search -- see runSearchWithRetry) still didn't find sufficient
+  // evidence. A secondary-source-only answer that DID find enough
+  // corroboration is not a retrieval failure -- only silence from every
+  // tier is. Callers use this to hard-stop generation rather than let the
+  // model answer from unverified prior knowledge.
+  retrievalFailed: boolean;
+  // Human-readable reason to show the user when retrievalFailed is true --
+  // names the specific official source(s) that were tried, per the
+  // retrieval pipeline's failure-handling requirement. Undefined when
+  // retrievalFailed is false.
+  retrievalFailureReason?: string;
 }
 
 // Deterministic, mechanical explanation of a confidence rating -- source
@@ -382,6 +402,7 @@ export async function buildResearchPacket(
 ): Promise<ResearchPacket> {
   const maxSearchResults = options?.maxSearchResults ?? 10;
   const onStage = options?.onStage;
+  const diagnostics = maybeCreateRetrievalDiagnostics();
   onStage?.("Planning research");
 
   // jurisdiction/state are already resolved by the caller (see
@@ -393,6 +414,7 @@ export async function buildResearchPacket(
 
   const providers = selectGovProviders(intents, jurisdiction);
   const officialRoute = selectOfficialDomains(intents, jurisdiction, state, question);
+  recordRouterInvocation(diagnostics, officialRoute.domains, officialRoute.labels);
   onStage?.("✓ Identifying official sources");
 
   const liveDataParts: string[] = [];
@@ -449,6 +471,7 @@ export async function buildResearchPacket(
     // than a generic .gov/.mil bias.
     preferOfficial: officialRoute,
     onProgress: onStage ? (update) => onStage(update.label) : undefined,
+    diagnostics,
   });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
@@ -488,6 +511,24 @@ export async function buildResearchPacket(
 
   const confidence = computeConfidence(sources, directGovHit);
   onStage?.("✓ Verifying retrieved information");
+
+  // Only a genuine double failure counts: no direct gov-data-provider hit,
+  // AND the two-phase web search (official domains first, THEN a genuinely
+  // broadened secondary-source search -- see runSearchWithRetry) still
+  // didn't turn up sufficient evidence. A secondary-source-only answer that
+  // DID find enough corroboration is not a retrieval failure; only silence
+  // from every tier, official and secondary alike, is.
+  const retrievalFailed = !directGovHit && searchResult.stillWeak;
+  const retrievalFailureReason = retrievalFailed
+    ? isSpecificRoute(officialRoute)
+      ? `Official source(s) could not be retrieved for this question (tried: ${officialRoute.labels.join(", ")}), and a ` +
+        "broadened secondary-source search afterward also did not find sufficient corroborated evidence. I don't " +
+        "want to guess at legislative or government facts without a source -- try rephrasing the question, or " +
+        "check Settings for search/government-source configuration."
+      : "No official government source or web search result could be retrieved for this question, even after a " +
+        "broadened secondary-source search. I don't want to guess -- try rephrasing the question, or check " +
+        "Settings for search/government-source configuration."
+    : undefined;
 
   const instructions = [
     "Cite every source you use by its URL. Never invent a source, figure, or detail not present below. Only " +
@@ -552,6 +593,12 @@ export async function buildResearchPacket(
   // provider already retrieved), the earlier, "always_keep"-tagged entry is
   // the one kept.
   const sortedSources = sortByAuthority(dedupeByUrl(sources));
+
+  if (diagnostics) {
+    recordDocumentsProvided(diagnostics, sortedSources.map((s) => ({ url: s.url, title: s.title })));
+    printRetrievalDiagnostics(question, diagnostics);
+  }
+
   return {
     intents: Array.from(intents),
     jurisdiction,
@@ -560,5 +607,7 @@ export async function buildResearchPacket(
     liveData,
     confidence,
     confidenceReason: buildConfidenceReason(confidence, sortedSources, directGovHit),
+    retrievalFailed,
+    retrievalFailureReason,
   };
 }
