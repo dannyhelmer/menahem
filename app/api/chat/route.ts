@@ -33,7 +33,7 @@ import {
   type DocumentCitationContext,
 } from "@/lib/documents/citation-verification";
 import { extractFinancialLineItems } from "@/lib/documents/budget-extract";
-import { getFinancialLineItems, hasAttemptedFinancialExtraction, saveFinancialLineItems } from "@/lib/documents/budget-store";
+import { claimFinancialExtraction, getFinancialLineItems, saveFinancialLineItems } from "@/lib/documents/budget-store";
 import { computeBudgetAnalysis, type BudgetAnalysis } from "@/lib/documents/budget-analysis";
 import { verifyBudgetObjectiveFindings } from "@/lib/documents/budget-verification";
 import { wantsBudgetAnalysis } from "@/lib/intelligence/budget-intent";
@@ -401,20 +401,22 @@ interface BudgetAnalysisContextResult {
 }
 
 // Document Intelligence Phase 4: extraction runs at most once per document
-// (cached via hasAttemptedFinancialExtraction/financial_extraction_attempted
-// -- most uploads aren't budget documents, so this only costs an extra LLM
-// call the first time someone actually asks a budget-statistics question
-// about a given document, not on every upload). Every number handed to the
-// model below was computed in plain arithmetic from verified line items --
+// (claimFinancialExtraction atomically claims the job, so two concurrent
+// budget questions about the same document can never both run extraction
+// and double every line item -- see that function's comment). Most
+// uploads aren't budget documents, so this only costs an extra LLM call
+// the first time someone actually asks a budget-statistics question about
+// a given document, not on every upload. Every number handed to the model
+// below was computed in plain arithmetic from verified line items --
 // never something the model is asked to calculate itself.
 async function buildBudgetAnalysisContext(documentId: string, userId: string): Promise<BudgetAnalysisContextResult | null> {
   const document = await getDocument(documentId, userId);
   if (!document) return null;
 
-  if (!(await hasAttemptedFinancialExtraction(documentId, userId))) {
+  if (await claimFinancialExtraction(documentId, userId)) {
     const pages = await getDocumentPages(documentId, userId);
     const items = pages.length > 0 ? await extractFinancialLineItems(pages, document.paginated, userId) : [];
-    await saveFinancialLineItems(documentId, userId, items);
+    await saveFinancialLineItems(documentId, items);
   }
 
   const items = await getFinancialLineItems(documentId, userId);

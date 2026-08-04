@@ -20,12 +20,27 @@ function toLineItem(row: LineItemRow): FinancialLineItem {
   };
 }
 
-export async function hasAttemptedFinancialExtraction(documentId: string, userId: string): Promise<boolean> {
+// Atomically "claims" the extraction job for this document -- true only
+// for the ONE caller that successfully flips financial_extraction_attempted
+// from false to true. Two concurrent budget-analysis questions about the
+// same document (a double-click, or two quick follow-up questions) would
+// otherwise both see "not attempted yet" via a separate read, both run
+// extraction, and both insert every line item -- silently doubling every
+// computed sum with no error or warning. The UPDATE...WHERE...RETURNING
+// here is atomic at the database level, so exactly one concurrent caller
+// ever gets `true`; the other proceeds straight to reading whatever's
+// there (possibly empty for a moment until the winner finishes writing --
+// acceptable eventual consistency, not worth a full lock/wait mechanism
+// for how rarely two budget questions land within milliseconds of each
+// other).
+export async function claimFinancialExtraction(documentId: string, userId: string): Promise<boolean> {
   await ensureSchema();
   const rows = (await sql`
-    SELECT financial_extraction_attempted FROM documents WHERE id = ${documentId} AND user_id = ${userId}
-  `) as { financial_extraction_attempted: boolean }[];
-  return rows[0]?.financial_extraction_attempted ?? false;
+    UPDATE documents SET financial_extraction_attempted = true
+    WHERE id = ${documentId} AND user_id = ${userId} AND financial_extraction_attempted = false
+    RETURNING id
+  `) as { id: string }[];
+  return rows.length > 0;
 }
 
 export async function getFinancialLineItems(documentId: string, userId: string): Promise<FinancialLineItem[]> {
@@ -40,24 +55,20 @@ export async function getFinancialLineItems(documentId: string, userId: string):
   return rows.map(toLineItem);
 }
 
-// Saves the extraction result (even if empty -- an empty result IS the
-// result for a non-budget document) and marks extraction as attempted in
-// one transaction, so a document is never left in a state where
-// financial_extraction_attempted is true but its line items didn't
-// actually get written, or vice versa.
-export async function saveFinancialLineItems(
-  documentId: string,
-  userId: string,
-  items: FinancialLineItem[],
-): Promise<void> {
+// Saves the extraction result -- a no-op for an empty result (an empty
+// result IS the result for a non-budget document; nothing to insert).
+// financial_extraction_attempted is set separately by
+// claimFinancialExtraction, BEFORE extraction even runs, not here -- see
+// that function's comment for why.
+export async function saveFinancialLineItems(documentId: string, items: FinancialLineItem[]): Promise<void> {
   await ensureSchema();
-  await sql.transaction((tx) => [
-    tx`UPDATE documents SET financial_extraction_attempted = true WHERE id = ${documentId} AND user_id = ${userId}`,
-    ...items.map(
+  if (items.length === 0) return;
+  await sql.transaction((tx) =>
+    items.map(
       (item) => tx`
         INSERT INTO document_financial_line_items (document_id, category, amount, fiscal_year, page_number, source_snippet)
         VALUES (${documentId}, ${item.category}, ${item.amount}, ${item.fiscalYear}, ${item.pageNumber}, ${item.sourceSnippet})
       `,
     ),
-  ]);
+  );
 }

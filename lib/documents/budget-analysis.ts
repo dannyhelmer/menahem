@@ -50,7 +50,16 @@ export interface BudgetAnalysis {
   spendingPerResident: { fiscalYear: string | null; totalSpending: number; population: number; perResident: number }[];
 }
 
-const POPULATION_CATEGORY_RE = /\b(population|total residents|resident count)\b/i;
+// Anchored to the WHOLE category string, not a substring match -- a real
+// budget line item can legitimately be named "Population Health
+// Department" or "Population Services," and a plain \b...\b substring
+// match would wrongly classify that department's dollar amount as a
+// population COUNT instead (corrupting spendingPerResident: dividing total
+// spending by a department's budget figure as if it were a number of
+// residents). A genuine population figure is normally extracted as an
+// essentially bare category like "Population" or "Total Residents," which
+// this still matches correctly.
+const POPULATION_CATEGORY_RE = /^(total |city |county |estimated )*(population|residents?( count)?)$/i;
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;

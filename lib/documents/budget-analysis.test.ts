@@ -116,4 +116,24 @@ describe("computeBudgetAnalysis: spending per resident", () => {
     const analysis = computeBudgetAnalysis([item("Police", 1_000_000, "FY2027"), item("Population", 50_000, "FY2027")]);
     expect(analysis.categoryTotals.map((c) => c.category)).toEqual(["Police"]);
   });
+
+  it("does not misclassify a real budget category that merely contains the word 'population'", () => {
+    // A department genuinely named "Population Health Department" has a
+    // dollar amount, not a resident count -- treating it as one would
+    // divide total spending by $2,000,000 as if that were a number of
+    // residents, corrupting every per-resident figure computed from it.
+    const analysis = computeBudgetAnalysis([item("Population Health Department", 2_000_000, "FY2027")]);
+    expect(analysis.categoryTotals).toEqual([{ category: "Population Health Department", fiscalYear: "FY2027", amount: 2_000_000 }]);
+    expect(analysis.spendingPerResident).toEqual([]);
+  });
+
+  it("still recognizes common real-world population-figure phrasings", () => {
+    const analysis = computeBudgetAnalysis([
+      item("Police", 1_000_000, "FY2027"),
+      item("Total Population", 50_000, "FY2027"),
+    ]);
+    expect(analysis.spendingPerResident).toEqual([
+      { fiscalYear: "FY2027", totalSpending: 1_000_000, population: 50_000, perResident: 20 },
+    ]);
+  });
 });
