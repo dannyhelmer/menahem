@@ -284,8 +284,8 @@ function hasSufficientEvidence(sources: SearchSource[] | undefined): boolean {
 
 // Strips parentheticals and quoted asides that can over-narrow a query
 // (e.g. "H.R. 1 (One Big Beautiful Bill Act)" -> "H.R. 1"), then biases the
-// retry toward primary/official sources instead of just repeating the same
-// search verbatim.
+// phase-2 search toward primary/official sources instead of just repeating
+// the same search verbatim.
 function broadenQuery(query: string): string {
   const stripped = query
     .replace(/\([^)]*\)/g, "")
@@ -296,38 +296,86 @@ function broadenQuery(query: string): string {
   return `${base} official source`;
 }
 
-// The automatic retrieval-quality gate requested for research questions
-// (legislation, court cases, official data, policy comparisons, government
-// information): run an initial search, evaluate whether what came back is
-// actually sufficient, and if not, automatically broaden the query and
-// retry ONCE before handing anything to the model -- never require the user
-// to notice weak results and manually ask for a re-search themselves.
+// Biases phase 1 toward official government sources using the `site:`
+// operator embedded directly in the query text -- provider-agnostic (works
+// identically whether Tavily, Brave, Google, or SerpAPI is configured)
+// without needing a per-provider "restrict domains" parameter that none of
+// the four currently expose through this codebase's SearchOptions. .mil is
+// included alongside .gov for defense/military topics; state legislature
+// sites that run on a "state.XX.us" pattern rather than .gov are still
+// caught downstream by sourceAuthorityRank/hasSufficientEvidence once
+// fetched, since the site: filter only narrows the search step itself.
+function officialDomainQuery(query: string): string {
+  return `${query} site:gov OR site:mil`;
+}
+
+// The retrieval pipeline requested: for government-research queries, search
+// official domains first, and only if that's insufficient, fall back to
+// secondary sources -- never a single broad search ranked afterward. Phase 1
+// restricts the search itself to .gov/.mil; only when that comes back
+// insufficient does phase 2 run a genuinely unrestricted secondary search.
+// Kept at exactly two phases (not three) so the total wall-clock time still
+// fits inside the caller's outer SEARCH_TIMEOUT_MS budget, which was sized
+// for two SEARCH_PHASE_TIMEOUT_MS phases.
+//
+// preferOfficial is opt-in, not the default: this function is also called
+// for the generic catch-all "web search" path (weather, sports scores,
+// general facts -- anything that didn't match a government/political
+// intent upstream), where restricting phase 1 to .gov/.mil would just waste
+// a search call on topics that were never going to have an official source.
+// Callers that already know the query is government/legislative research
+// (buildResearchPacket, gated on politicalIntents) pass preferOfficial:true.
 export async function runSearchWithRetry(
   query: string,
   maxResults = 5,
-  options?: { preferRecent?: boolean; onProgress?: (update: SearchProgressUpdate) => void },
+  options?: { preferRecent?: boolean; preferOfficial?: boolean; onProgress?: (update: SearchProgressUpdate) => void },
 ): Promise<SearchWithRetryOutcome> {
-  const first = await runSearchForMessage(query, maxResults, options);
+  const firstQuery = options?.preferOfficial ? officialDomainQuery(query) : query;
+  const first = await runSearchForMessage(firstQuery, maxResults, options);
 
   if (hasSufficientEvidence(first.sources)) {
     return { ...first, retried: false, stillWeak: false };
   }
 
-  console.log(
-    `[orchestrate] initial retrieval insufficient for "${query.slice(0, 120)}" ` +
-      `(${first.sources?.length ?? 0} source(s), no authoritative hit) -- broadening query and retrying`,
-  );
-  options?.onProgress?.({ label: "Initial results were limited -- broadening the search..." });
+  if (!options?.preferOfficial) {
+    // Not a government-biased search -- fall back to the existing
+    // broadened-retry behavior (phase 2 isn't "secondary sources" here,
+    // it's just a less-narrow version of the same general search).
+    console.log(
+      `[orchestrate] initial retrieval insufficient for "${query.slice(0, 120)}" ` +
+        `(${first.sources?.length ?? 0} source(s), no authoritative hit) -- broadening query and retrying`,
+    );
+    options?.onProgress?.({ label: "Initial results were limited -- broadening the search..." });
+  } else {
+    console.log(
+      `[orchestrate] official-domain search insufficient for "${query.slice(0, 120)}" ` +
+        `(${first.sources?.length ?? 0} source(s), no authoritative hit) -- falling back to secondary sources`,
+    );
+    options?.onProgress?.({ label: "No sufficient official sources found -- searching secondary sources..." });
+  }
 
   const broadenedQuery = broadenQuery(query);
+  // When phase 1 wasn't official-biased and there's nothing for broadenQuery
+  // to strip, the phase-2 query would be identical to phase 1's -- reuse the
+  // result instead of paying for a duplicate provider call that would just
+  // return the same thing again.
   const retry =
-    broadenedQuery.toLowerCase() === query.toLowerCase()
-      ? first // nothing to strip -- retrying with an identical query would just repeat the same call
+    !options?.preferOfficial && broadenedQuery.toLowerCase() === firstQuery.toLowerCase()
+      ? first
       : await runSearchForMessage(broadenedQuery, Math.max(maxResults, 8), options);
 
+  // preferOfficial: phase-1 (official) sources are listed first -- they're
+  // the preferred citations per the requested source priority. Otherwise
+  // (generic broadened retry): the broadened retry is listed first, as
+  // before -- it's presumed to have found more/better results than the
+  // narrower first attempt. Either way, dedup-by-url keeps the first
+  // occurrence, so the higher-priority list wins on overlap.
   const seen = new Set<string>();
   const mergedSources: SearchSource[] = [];
-  for (const s of [...(retry.sources ?? []), ...(first.sources ?? [])]) {
+  const orderedSources = options?.preferOfficial
+    ? [...(first.sources ?? []), ...(retry.sources ?? [])]
+    : [...(retry.sources ?? []), ...(first.sources ?? [])];
+  for (const s of orderedSources) {
     if (!seen.has(s.url)) {
       mergedSources.push(s);
       seen.add(s.url);

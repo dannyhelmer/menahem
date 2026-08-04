@@ -38,7 +38,9 @@ const NEWS_DOMAINS = new Set([...WIRE_SERVICE_DOMAINS, ...NATIONAL_NEWS_DOMAINS,
 // itself (bill text, status, votes, committee action). A CBO estimate must
 // never replace or outrank the bill's own official record for what the
 // bill actually says or where it stands procedurally -- it supplements
-// that record with fiscal analysis.
+// that record with fiscal analysis. Still ranked above universities/legal
+// analysis below, per the stated priority order (CRS/GAO/equivalent
+// government reports before public universities).
 const ANALYSIS_AGENCY_DOMAINS = new Set(["cbo.gov", "gao.gov", "crsreports.congress.gov", "everycrsreport.com"]);
 
 // Academic/legal-analysis domains (secondary tier: universities, legal
@@ -82,6 +84,9 @@ const STATE_LEGISLATURE_RE =
   /\b(state )?senate\b|\bhouse of representatives\b|\bgeneral assembly\b|\bstate legislature\b|\blegislature\b|\bbill status\b|\bbill history\b|\bbill tracking\b|\blegislative information\b/i;
 const STATE_STATUTES_RE = /\bstatutes?\b|\brevised (statutes|code)\b|\bstate code\b|\bsession laws?\b|\badministrative code\b/i;
 const GOVERNOR_RE = /\bgovernor'?s?( office)?\b/i;
+// Matches both state supreme courts and the U.S. Supreme Court -- "supreme
+// court" alone doesn't distinguish them, and it doesn't need to: both are
+// court opinions, ranked the same relative to government agencies.
 const STATE_COURTS_RE = /\bsupreme court\b|\bcourt of appeals\b|\bappellate court\b|\bstate court\w*\b/i;
 const STATE_AGENCY_RE = /\bdepartment of\b|\bstate agency\b|\bdivision of\b|\bstate commission\b/i;
 const COUNTY_GOV_RE = /\bcounty\b|\bparish of\b/i;
@@ -148,28 +153,35 @@ export function sourceTierScore(url: string): number {
 // Checked most-specific-first.
 //
 // Federal priority order (exact, as specified): Congress.gov -> House.gov
-// -> Senate.gov -> Federal Register -> govinfo.gov -> SupremeCourt.gov ->
-// other federal agency (.gov). CBO/CRS/GAO are deliberately ranked in the
-// SECONDARY band below (see ANALYSIS_AGENCY_DOMAINS) -- they're official
-// and nonpartisan, but they analyze legislation rather than being the
-// legislative record itself.
+// -> Senate.gov -> Federal Register -> govinfo.gov -> other government
+// agencies -> court opinions. supremecourt.gov is deliberately NOT pinned
+// here -- it falls through to the generic .gov categorization below (its
+// title matches STATE_COURTS_RE's "supreme court" pattern, which is
+// intentionally worded broadly enough to also catch the federal Supreme
+// Court), landing below agency pages so that official government agencies
+// outrank court opinions, per the requested source priority: (2) official
+// government agencies before (3) official court opinions.
 const AUTHORITY_RULES: [(host: string) => boolean, number][] = [
   [(h) => h === "congress.gov", 100],
   [(h) => h.endsWith(".house.gov") || h === "house.gov", 98],
   [(h) => h.endsWith(".senate.gov") || h === "senate.gov", 97],
   [(h) => h === "federalregister.gov", 95],
   [(h) => h === "govinfo.gov", 93],
-  [(h) => h === "supremecourt.gov", 91],
 ];
 
 // State-category rank bands, applied when a .gov/.mil/.us domain doesn't
 // match one of the fixed federal domains above -- in the exact state
 // priority order requested: legislature/bill-status -> statutes/code ->
 // governor -> state agency -> state courts -> (separately, local
-// government below all of these). An unclassified official government page
-// (no recognizable category in its title) sits between state agencies and
-// local government -- still presumed a legitimate state/federal source,
-// just not confidently categorized.
+// government below all of these). Reused for federal pages that aren't one
+// of the fixed AUTHORITY_RULES domains too (e.g. a federal agency's
+// "Department of X" title matches the same state_agency pattern, and
+// supremecourt.gov matches state_courts) -- which is what puts government
+// agencies above court opinions at both levels, per the requested order.
+// An unclassified official government page (no recognizable category in
+// its title) sits between state agencies and local government -- still
+// presumed a legitimate state/federal source, just not confidently
+// categorized.
 const GOV_CATEGORY_RANK: Record<GovCategory, number> = {
   state_legislature: 87,
   state_statutes: 85,
@@ -193,12 +205,12 @@ export function sourceAuthorityRank(url: string, title = ""): number {
     // their official sites on a "state.XX.us" pattern rather than ".gov".
     return GOV_CATEGORY_RANK[classifyGovSource(title)];
   }
-  // Secondary tier, in the requested order: universities/government-funded
-  // research -> CBO/CRS/GAO -> Ballotpedia -> other nonprofit policy
-  // organizations -> news (only if necessary) -> private websites ->
-  // Wikipedia last.
-  if (bareHost.endsWith(".edu") || LEGAL_ANALYSIS_DOMAINS.has(bareHost)) return 62; // universities / legal analysis
-  if (ANALYSIS_AGENCY_DOMAINS.has(bareHost)) return 58; // CBO / CRS / GAO
+  // Secondary tier, in the requested order: CBO/CRS/GAO or equivalent
+  // government reports -> public universities/legal analysis -> Ballotpedia
+  // -> other nonprofit policy organizations -> news (only if necessary) ->
+  // private websites -> Wikipedia last.
+  if (ANALYSIS_AGENCY_DOMAINS.has(bareHost)) return 62; // CBO / CRS / GAO / equivalent government reports
+  if (bareHost.endsWith(".edu") || LEGAL_ANALYSIS_DOMAINS.has(bareHost)) return 58; // public universities / legal analysis
   if (bareHost === BALLOTPEDIA_DOMAIN) return 54; // Ballotpedia
   if (REFERENCE_DOMAINS.has(bareHost)) return 52; // other nonprofit policy organizations
   if (WIRE_SERVICE_DOMAINS.has(bareHost)) return 45; // news -- only if necessary

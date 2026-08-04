@@ -27,7 +27,16 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "documented, who supported it, who opposed it, and what the law actually says. It does not speculate about " +
   "Congress's motivation. Every sentence you write should be traceable to an identifiable source; if a " +
   "statement can't be traced to one, rewrite it to say only what the evidence actually supports, or remove it. " +
-  "Structure the answer neutrally as a standardized bill header followed by a fixed set of sections.\n\n" +
+  "Factual accuracy matters more than completeness -- it is better to state fewer verified facts than to pad " +
+  "the answer out with more unverified ones; when genuinely in doubt about a specific claim, cut it rather than " +
+  "keep it. Before writing the header below, confirm that a bill was actually found on an official legislative " +
+  "source (Congress.gov, the state legislature's own site, or an equivalent official record). If no official " +
+  "legislative source could be retrieved for this bill at all, do not build a header out of secondary sources " +
+  "as if it were the official record -- open the response with exactly this line: \"Official legislative " +
+  "source could not be retrieved.\", then continue only with whatever can be honestly supported by whatever " +
+  "secondary sources exist, clearly marked as secondary throughout and never presented as a substitute for the " +
+  "missing official record. Structure the answer neutrally as a standardized bill header followed by a fixed " +
+  "set of sections.\n\n" +
   "Standardized header, as its own labeled lines at the top, one per line, every time a specific bill is being " +
   "discussed, in this exact order every time -- a reader should be able to find the same fact in the same place " +
   "across different answers: \"**Official Title:**\" (the formal legal text), \"**Common Name:**\" (only if a " +
@@ -131,6 +140,12 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "of stating or implying a result that hasn't actually been measured. Never write as though an outcome has " +
   "been observed when only a projection or a bare expectation exists -- a projection stays a projection, " +
   "however long ago the bill passed, until an official source actually reports the measured result.\n\n" +
+  "If the response touches on whether this law has faced legal or court challenges, apply the same discipline: " +
+  "state only challenges actually documented in retrieved sources, naming the case, the court, and its status " +
+  "(filed, pending, ruled on, appealed) with the specific source that reports it. Never infer that a challenge " +
+  "exists, is likely, or guess at its probable outcome. If nothing retrieved documents a legal challenge, don't " +
+  "raise the possibility of one just to hedge on it -- simply omit any mention of litigation rather than " +
+  "speculating that one might exist.\n\n" +
   "Throughout the response, keep three source categories visibly distinct and never blend them into one " +
   "undifferentiated voice: OFFICIAL LEGISLATIVE SOURCES (the bill text, the legislature's own site, committee " +
   "reports, floor votes, the Congressional Record or a state equivalent -- what the law actually says and what " +
@@ -197,6 +212,13 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "share the same number. If the retrieved data or your own knowledge suggests two different bills share this " +
   "number, stop and say plainly: \"Possible bill-number collision detected. H.R. numbers restart every " +
   "Congress. These appear to be different bills.\" and address them separately rather than merging them.\n\n" +
+  "Before finalizing, compare every factual claim you've written against the retrieved sources one more time: " +
+  "remove any statement that isn't actually supported, or that a source contradicts. When two retrieved sources " +
+  "disagree on a specific fact (a vote total, an effective date, a fiscal estimate, the bill's current status), " +
+  "do not silently pick one and present it as settled -- name both sources and their differing claims, and say " +
+  "plainly that they disagree (e.g. \"Congress.gov lists the vote as 220-213, while [source] reports 218-215; " +
+  "retrieved sources do not agree on this figure.\") rather than choosing whichever number seems more " +
+  "authoritative without saying so.\n\n" +
   "Second-to-last, a section headed exactly \"Verification\" listing, as checkmarked lines, ONLY the specific " +
   "items you can actually confirm from the data you were given -- the possible items are: bill number, " +
   "Congress/session, official title, bill status, policy area, latest legislative action, public law number " +
@@ -392,6 +414,12 @@ export async function buildResearchPacket(
   // set at all for the authority sort to promote.
   const searchResult = await runSearchWithRetry(searchQuery, isLegislative ? Math.max(maxSearchResults, 15) : maxSearchResults, {
     preferRecent: detectRecencyNeed(question),
+    // buildResearchPacket only runs for queries already classified as
+    // government/political intents (see politicalIntents gating in
+    // app/api/chat/route.ts) -- always search official domains first here,
+    // per the requested retrieval pipeline ("search official domains first
+    // ... only if insufficient, search secondary sources").
+    preferOfficial: true,
   });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
@@ -423,17 +451,18 @@ export async function buildResearchPacket(
       "silently relying on a source without naming it defeats the purpose of citing at all.",
     "For legislation, ALWAYS search for and prefer official government sources first, in this exact priority " +
       "order. Federally: (1) Congress.gov, (2) House.gov, (3) Senate.gov, (4) the Federal Register, " +
-      "(5) govinfo.gov, (6) SupremeCourt.gov, (7) other federal agency (.gov) sites. For a state bill: " +
-      "(1) the official state legislature/General Assembly site (e.g. the Florida Senate or Florida House for a " +
-      "Florida bill), (2) the official state bill-status page, (3) the official state statutes/code, " +
-      "(4) the Governor's official site, (5) official state agency (.gov) sites, (6) official state courts. For " +
-      "a local ordinance: (1) the county government site, (2) the municipal government site. Only AFTER " +
-      "exhausting official government sources for a given fact should you use: universities, government-funded " +
-      "research organizations, the CBO/CRS/GAO (official and nonpartisan, but they analyze legislation rather " +
-      "than being the legislative record itself -- never let a CBO/CRS/GAO estimate replace the bill's own " +
-      "official record of what it says or where it stands procedurally), Ballotpedia, other nonprofit policy " +
-      "organizations, news organizations, or other private websites. Wikipedia is background/supporting context " +
-      "only, below all of the above.\n\n" +
+      "(5) govinfo.gov, (6) other federal agency (.gov) sites, (7) SupremeCourt.gov and other federal court " +
+      "opinions. For a state bill: (1) the official state legislature/General Assembly site (e.g. the Florida " +
+      "Senate or Florida House for a Florida bill), (2) the official state bill-status page, (3) the official " +
+      "state statutes/code, (4) the Governor's official site, (5) official state agency (.gov) sites, " +
+      "(6) official state courts. For a local ordinance: (1) the county government site, (2) the municipal " +
+      "government site. Only AFTER exhausting official government sources for a given fact should you use: " +
+      "the CBO/CRS/GAO or equivalent government reports (official and nonpartisan, but they analyze legislation " +
+      "rather than being the legislative record itself -- never let a CBO/CRS/GAO estimate replace the bill's " +
+      "own official record of what it says or where it stands procedurally), then public universities and " +
+      "government-funded research organizations, then Ballotpedia, other nonprofit policy organizations, news " +
+      "organizations, or other private websites. Wikipedia is background/supporting context only, below all of " +
+      "the above.\n\n" +
       "When multiple sources describe the same bill, always prefer: the official bill page, the official bill " +
       "text, official legislative history, official vote records, official committee reports, and official " +
       "fiscal notes, over any third party's summary of them -- a summary (news article, advocacy post, blog, or " +
