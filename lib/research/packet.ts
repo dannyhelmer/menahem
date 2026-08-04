@@ -5,6 +5,7 @@ import type { GovDataProvider } from "@/lib/gov-data/types";
 import { getConnectedEntities } from "@/lib/graph/store";
 import { getTimeline } from "@/lib/timeline/store";
 import { runSearchWithRetry } from "@/lib/search/orchestrate";
+import { isSpecificRoute, selectOfficialDomains } from "@/lib/search/source-router";
 import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
 import { dedupeByUrl, sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
 
@@ -377,10 +378,23 @@ export async function buildResearchPacket(
   intents: Set<PoliticalIntent>,
   jurisdiction: Jurisdiction,
   state: string | null,
-  options?: { maxSearchResults?: number },
+  options?: { maxSearchResults?: number; onStage?: (label: string) => void },
 ): Promise<ResearchPacket> {
   const maxSearchResults = options?.maxSearchResults ?? 10;
+  const onStage = options?.onStage;
+  onStage?.("Planning research");
+
+  // jurisdiction/state are already resolved by the caller (see
+  // resolveJurisdictionAndState in app/api/chat/route.ts) before this
+  // function is ever called -- this stage is presented from the user's
+  // point of view (a real step in the pipeline they should see happened),
+  // not a marker of work this function itself performs.
+  onStage?.("✓ Determining jurisdiction");
+
   const providers = selectGovProviders(intents, jurisdiction);
+  const officialRoute = selectOfficialDomains(intents, jurisdiction, state, question);
+  onStage?.("✓ Identifying official sources");
+
   const liveDataParts: string[] = [];
   const sources: TieredSource[] = [];
   let directGovHit = false;
@@ -391,6 +405,7 @@ export async function buildResearchPacket(
     if (result.success && result.liveData) {
       liveDataParts.push(result.liveData);
       directGovHit = true;
+      onStage?.(`✓ Searching ${provider.label}`);
       for (const s of result.sources ?? []) sources.push({ ...s, tier: sourceTier(s.url, s.title), provenance: "always_keep" });
 
       const relatedNote = await buildRelatedEntitiesNote(result.graph?.representativeId, result.graph?.entityId);
@@ -400,6 +415,10 @@ export async function buildResearchPacket(
       if (timelineNote) liveDataParts.push(timelineNote);
     } else if (result.note) {
       liveDataParts.push(result.note);
+      // A "not configured" note isn't a retrieval failure worth flagging in
+      // the checklist -- only surface the warning when the provider was
+      // actually reachable and came up empty/errored.
+      onStage?.(result.note.includes("isn't configured") ? `Skipped ${provider.label} (not configured)` : `⚠ ${provider.label} unavailable`);
     }
   }
 
@@ -425,8 +444,11 @@ export async function buildResearchPacket(
     // government/political intents (see politicalIntents gating in
     // app/api/chat/route.ts) -- always search official domains first here,
     // per the requested retrieval pipeline ("search official domains first
-    // ... only if insufficient, search secondary sources").
-    preferOfficial: true,
+    // ... only if insufficient, search secondary sources"), targeting the
+    // specific official sites the source router identified above rather
+    // than a generic .gov/.mil bias.
+    preferOfficial: officialRoute,
+    onProgress: onStage ? (update) => onStage(update.label) : undefined,
   });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
@@ -449,7 +471,23 @@ export async function buildResearchPacket(
     liveDataParts.push(searchResult.note + (searchResult.retried ? " (already retried once with a broadened query)" : ""));
   }
 
+  // Named-source transparency: when phase 1 targeted a SPECIFIC official
+  // route (not just the generic .gov/.mil floor) and still came up short,
+  // say plainly which official source(s) failed, per the retrieval
+  // pipeline's failure-handling requirement -- distinct from the stillWeak
+  // note above, which only fires if secondary sources ALSO came up thin;
+  // this one fires whenever the official leg of the search failed, even if
+  // secondary sources then filled the gap.
+  if (searchResult.retried && isSpecificRoute(officialRoute)) {
+    liveDataParts.push(
+      `Unable to retrieve sufficient results from ${officialRoute.labels.join(", ")} for this query -- ` +
+        "secondary sources were used instead where available. If you rely on secondary sources for any fact " +
+        "here, say plainly that the official source(s) above could not be retrieved for it.",
+    );
+  }
+
   const confidence = computeConfidence(sources, directGovHit);
+  onStage?.("✓ Verifying retrieved information");
 
   const instructions = [
     "Cite every source you use by its URL. Never invent a source, figure, or detail not present below. Only " +

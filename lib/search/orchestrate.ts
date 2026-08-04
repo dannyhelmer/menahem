@@ -296,41 +296,49 @@ function broadenQuery(query: string): string {
   return `${base} official source`;
 }
 
-// Biases phase 1 toward official government sources using the `site:`
-// operator embedded directly in the query text -- provider-agnostic (works
-// identically whether Tavily, Brave, Google, or SerpAPI is configured)
-// without needing a per-provider "restrict domains" parameter that none of
-// the four currently expose through this codebase's SearchOptions. .mil is
-// included alongside .gov for defense/military topics; state legislature
-// sites that run on a "state.XX.us" pattern rather than .gov are still
-// caught downstream by sourceAuthorityRank/hasSufficientEvidence once
-// fetched, since the site: filter only narrows the search step itself.
-function officialDomainQuery(query: string): string {
-  return `${query} site:gov OR site:mil`;
+// Biases phase 1 toward specific official government domains using the
+// `site:` operator embedded directly in the query text -- provider-agnostic
+// (works identically whether Tavily, Brave, Google, or SerpAPI is
+// configured) without needing a per-provider "restrict domains" parameter
+// that none of the four currently expose through this codebase's
+// SearchOptions. `domains` comes from the caller's source router (see
+// lib/search/source-router.ts) -- specific official sites for the topic/
+// jurisdiction (e.g. "ilga.gov") when known, or the generic "gov"/"mil"
+// floor otherwise.
+function officialDomainQuery(query: string, domains: string[]): string {
+  return `${query} ${domains.map((d) => `site:${d}`).join(" OR ")}`;
+}
+
+export interface PreferOfficial {
+  domains: string[];
+  labels: string[];
 }
 
 // The retrieval pipeline requested: for government-research queries, search
 // official domains first, and only if that's insufficient, fall back to
 // secondary sources -- never a single broad search ranked afterward. Phase 1
-// restricts the search itself to .gov/.mil; only when that comes back
-// insufficient does phase 2 run a genuinely unrestricted secondary search.
-// Kept at exactly two phases (not three) so the total wall-clock time still
-// fits inside the caller's outer SEARCH_TIMEOUT_MS budget, which was sized
-// for two SEARCH_PHASE_TIMEOUT_MS phases.
+// restricts the search itself to the router's domains; only when that comes
+// back insufficient does phase 2 run a genuinely unrestricted secondary
+// search. Kept at exactly two phases (not three) so the total wall-clock
+// time still fits inside the caller's outer SEARCH_TIMEOUT_MS budget, which
+// was sized for two SEARCH_PHASE_TIMEOUT_MS phases.
 //
 // preferOfficial is opt-in, not the default: this function is also called
 // for the generic catch-all "web search" path (weather, sports scores,
 // general facts -- anything that didn't match a government/political
-// intent upstream), where restricting phase 1 to .gov/.mil would just waste
-// a search call on topics that were never going to have an official source.
+// intent upstream), where restricting phase 1 to official domains would
+// just waste a search call on topics that were never going to have one.
 // Callers that already know the query is government/legislative research
-// (buildResearchPacket, gated on politicalIntents) pass preferOfficial:true.
+// (buildResearchPacket, gated on politicalIntents) pass the source router's
+// result as preferOfficial.
 export async function runSearchWithRetry(
   query: string,
   maxResults = 5,
-  options?: { preferRecent?: boolean; preferOfficial?: boolean; onProgress?: (update: SearchProgressUpdate) => void },
+  options?: { preferRecent?: boolean; preferOfficial?: PreferOfficial; onProgress?: (update: SearchProgressUpdate) => void },
 ): Promise<SearchWithRetryOutcome> {
-  const firstQuery = options?.preferOfficial ? officialDomainQuery(query) : query;
+  const firstQuery = options?.preferOfficial
+    ? officialDomainQuery(query, options.preferOfficial.domains)
+    : query;
   const first = await runSearchForMessage(firstQuery, maxResults, options);
 
   if (hasSufficientEvidence(first.sources)) {
@@ -347,11 +355,12 @@ export async function runSearchWithRetry(
     );
     options?.onProgress?.({ label: "Initial results were limited -- broadening the search..." });
   } else {
+    const labels = options.preferOfficial.labels.join(", ");
     console.log(
       `[orchestrate] official-domain search insufficient for "${query.slice(0, 120)}" ` +
-        `(${first.sources?.length ?? 0} source(s), no authoritative hit) -- falling back to secondary sources`,
+        `(${first.sources?.length ?? 0} source(s), no authoritative hit from ${labels}) -- falling back to secondary sources`,
     );
-    options?.onProgress?.({ label: "No sufficient official sources found -- searching secondary sources..." });
+    options?.onProgress?.({ label: `No sufficient results from ${labels} -- searching secondary sources...` });
   }
 
   const broadenedQuery = broadenQuery(query);

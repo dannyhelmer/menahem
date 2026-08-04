@@ -908,7 +908,7 @@ async function routeMessage(
     const isMultiPart = detectMultiPartResearchQuestion(text);
     const packet = isMultiPart
       ? await buildPlannedResearchPacket(text, politicalIntents, jurisdiction, state, onStage, userId)
-      : await buildResearchPacket(text, politicalIntents, jurisdiction, state);
+      : await buildResearchPacket(text, politicalIntents, jurisdiction, state, { onStage });
 
     liveDataParts.push(packet.liveData);
     if (detectCriticism(text)) liveDataParts.push(CRITICISM_GUIDANCE);
