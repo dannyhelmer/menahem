@@ -33,7 +33,13 @@ import {
   type DocumentCitationContext,
 } from "@/lib/documents/citation-verification";
 import { extractFinancialLineItems } from "@/lib/documents/budget-extract";
-import { claimFinancialExtraction, getFinancialLineItems, saveFinancialLineItems } from "@/lib/documents/budget-store";
+import {
+  claimFinancialExtraction,
+  getFinancialLineItems,
+  markFinancialExtractionComplete,
+  saveFinancialLineItems,
+  waitForFinancialExtraction,
+} from "@/lib/documents/budget-store";
 import { computeBudgetAnalysis, type BudgetAnalysis } from "@/lib/documents/budget-analysis";
 import { verifyBudgetObjectiveFindings } from "@/lib/documents/budget-verification";
 import { wantsBudgetAnalysis } from "@/lib/intelligence/budget-intent";
@@ -409,14 +415,30 @@ interface BudgetAnalysisContextResult {
 // a given document, not on every upload. Every number handed to the model
 // below was computed in plain arithmetic from verified line items --
 // never something the model is asked to calculate itself.
+//
+// A caller that LOSES the claim race must not read line items immediately
+// -- they'd still be empty at that instant, wrongly reporting "no
+// financial data" for a document that actually has some, just not
+// written yet (a real bug, caught live: 4 of 5 simultaneous requests in
+// testing got this false negative before waitForFinancialExtraction was
+// added). It waits (bounded) for the winner to actually finish instead.
 async function buildBudgetAnalysisContext(documentId: string, userId: string): Promise<BudgetAnalysisContextResult | null> {
   const document = await getDocument(documentId, userId);
   if (!document) return null;
 
   if (await claimFinancialExtraction(documentId, userId)) {
-    const pages = await getDocumentPages(documentId, userId);
-    const items = pages.length > 0 ? await extractFinancialLineItems(pages, document.paginated, userId) : [];
-    await saveFinancialLineItems(documentId, items);
+    try {
+      const pages = await getDocumentPages(documentId, userId);
+      const items = pages.length > 0 ? await extractFinancialLineItems(pages, document.paginated, userId) : [];
+      await saveFinancialLineItems(documentId, items);
+    } finally {
+      // Always mark complete, even if extraction threw -- otherwise every
+      // concurrent loser would wait the full timeout for a request that's
+      // never coming, instead of failing fast to "no data found."
+      await markFinancialExtractionComplete(documentId, userId);
+    }
+  } else {
+    await waitForFinancialExtraction(documentId, userId, 8000);
   }
 
   const items = await getFinancialLineItems(documentId, userId);

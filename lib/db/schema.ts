@@ -167,10 +167,18 @@ async function runMigrations(): Promise<void> {
   // Document intelligence Phase 4: structured financial data, extracted
   // once and cached, so budget statistics (percentage changes, totals,
   // largest categories) can be COMPUTED IN CODE from real numbers instead
-  // of asked of the model. `financial_extraction_attempted` distinguishes
-  // "not tried yet" from "tried, found nothing" (most uploads aren't
-  // budget documents) so extraction only ever runs once per document.
+  // of asked of the model. `financial_extraction_attempted` is flipped
+  // atomically (UPDATE...WHERE...RETURNING, see claimFinancialExtraction)
+  // to CLAIM the extraction job -- distinct from
+  // `financial_extraction_completed_at`, which is only set once extraction
+  // has actually finished and its results (if any) are written. Without
+  // that distinction, a second concurrent request that loses the claim
+  // race would read zero line items immediately and wrongly tell the user
+  // "no financial data" for a document that has some, just not written
+  // yet -- it waits for completed_at instead (bounded, see
+  // waitForFinancialExtraction).
   await sql`ALTER TABLE documents ADD COLUMN IF NOT EXISTS financial_extraction_attempted boolean NOT NULL DEFAULT false`;
+  await sql`ALTER TABLE documents ADD COLUMN IF NOT EXISTS financial_extraction_completed_at timestamptz`;
   await sql`
     CREATE TABLE IF NOT EXISTS document_financial_line_items (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

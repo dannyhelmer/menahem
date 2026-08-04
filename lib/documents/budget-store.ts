@@ -28,11 +28,8 @@ function toLineItem(row: LineItemRow): FinancialLineItem {
 // extraction, and both insert every line item -- silently doubling every
 // computed sum with no error or warning. The UPDATE...WHERE...RETURNING
 // here is atomic at the database level, so exactly one concurrent caller
-// ever gets `true`; the other proceeds straight to reading whatever's
-// there (possibly empty for a moment until the winner finishes writing --
-// acceptable eventual consistency, not worth a full lock/wait mechanism
-// for how rarely two budget questions land within milliseconds of each
-// other).
+// ever gets `true`; the loser must NOT immediately read line items (still
+// empty at that instant) -- see waitForFinancialExtraction.
 export async function claimFinancialExtraction(documentId: string, userId: string): Promise<boolean> {
   await ensureSchema();
   const rows = (await sql`
@@ -41,6 +38,40 @@ export async function claimFinancialExtraction(documentId: string, userId: strin
     RETURNING id
   `) as { id: string }[];
   return rows.length > 0;
+}
+
+export async function markFinancialExtractionComplete(documentId: string, userId: string): Promise<void> {
+  await ensureSchema();
+  await sql`
+    UPDATE documents SET financial_extraction_completed_at = now()
+    WHERE id = ${documentId} AND user_id = ${userId}
+  `;
+}
+
+const EXTRACTION_POLL_INTERVAL_MS = 400;
+
+// Called by the caller that LOST the claim race -- rather than reading
+// line items immediately (which would still be empty if the winner hasn't
+// finished the LLM extraction call yet, wrongly reporting "no financial
+// data" for a document that actually has some), polls until
+// financial_extraction_completed_at is set or `timeoutMs` elapses. Returns
+// immediately, with no actual waiting, for the overwhelmingly common case
+// where extraction already finished long ago (completed_at was already
+// non-null before the first check) -- the polling cost only exists for a
+// genuine, rare race.
+export async function waitForFinancialExtraction(documentId: string, userId: string, timeoutMs: number): Promise<void> {
+  await ensureSchema();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const rows = (await sql`
+      SELECT financial_extraction_completed_at FROM documents WHERE id = ${documentId} AND user_id = ${userId}
+    `) as { financial_extraction_completed_at: string | null }[];
+    if (rows[0]?.financial_extraction_completed_at) return;
+    await new Promise((resolve) => setTimeout(resolve, EXTRACTION_POLL_INTERVAL_MS));
+  }
+  // Timed out -- the winner may have errored before marking completion.
+  // Proceed anyway rather than hanging the response; the caller reads
+  // whatever's actually there (possibly still empty), which is honest.
 }
 
 export async function getFinancialLineItems(documentId: string, userId: string): Promise<FinancialLineItem[]> {
