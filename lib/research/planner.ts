@@ -16,7 +16,7 @@ import { getProvider } from "@/lib/ai/get-provider";
 import { buildConfidenceReason, buildResearchPacket, type ResearchPacket, type TieredSource } from "./packet";
 import { dedupeByUrl, sortByAuthority } from "./source-tier";
 
-const MAX_RESEARCH_TASKS = 6;
+export const MAX_RESEARCH_TASKS = 6;
 const PLANNED_SEARCH_COUNT = 8;
 
 // The exact sentence required for a section with no usable evidence --
@@ -106,6 +106,19 @@ function computeOverallConfidence(sectionConfidences: ResearchPacket["confidence
   return "low";
 }
 
+// A task paired with the exact key its citations must be scoped to. Used
+// when the caller (see lib/research/research-plan.ts's planResearch) has
+// already identified the specific real-world entities this question needs
+// -- e.g. named laws in a multi-state comparison -- so buildPlannedResearchPacket
+// doesn't need to re-decompose the question itself, and doesn't need to
+// infer the section key from a detected US state (which only works when the
+// entity happens to BE a state; a court-case or federal-bill comparison has
+// no state to key off at all).
+export interface PlannedTask {
+  task: string;
+  sectionKey: string;
+}
+
 export async function buildPlannedResearchPacket(
   question: string,
   intents: Set<PoliticalIntent>,
@@ -113,9 +126,10 @@ export async function buildPlannedResearchPacket(
   state: string | null,
   onStage?: (label: string) => void,
   userId?: string,
+  precomputedTasks?: PlannedTask[],
 ): Promise<ResearchPacket> {
   onStage?.("Planning research");
-  const tasks = await planResearchTasks(question, userId);
+  const tasks = precomputedTasks ? precomputedTasks.map((t) => t.task) : await planResearchTasks(question, userId);
 
   onStage?.(`Researching ${tasks.length} topic${tasks.length === 1 ? "" : "s"} independently`);
   // allSettled, not all -- one task throwing must never take down the
@@ -152,17 +166,19 @@ export async function buildPlannedResearchPacket(
 
   const sections: string[] = [];
   const allSources: TieredSource[] = [];
-  // Per-section source scoping: only tasks with a resolved state get a
-  // section key -- this is specifically about state-decomposed questions
-  // (the confirmed cross-state citation-reuse case), not every possible
-  // multi-part decomposition. A task with no state still contributes its
-  // sources to the merged pool above, just without cross-section
-  // enforcement, matching this feature's scoped intent.
+  // Per-section source scoping: a precomputed task already carries its own
+  // section key (the specific entity it's about -- a law name, a case name,
+  // anything, not just a US state). Without precomputed tasks, only tasks
+  // with a resolved state get a section key -- this is specifically about
+  // state-decomposed questions (the confirmed cross-state citation-reuse
+  // case), not every possible multi-part decomposition. A task with no key
+  // either way still contributes its sources to the merged pool above, just
+  // without cross-section enforcement, matching this feature's scoped intent.
   const packetSections: { key: string; sources: TieredSource[] }[] = [];
 
   settled.forEach((result, i) => {
     const task = tasks[i];
-    const sectionKey = taskResolutions[i].state;
+    const sectionKey = precomputedTasks ? precomputedTasks[i].sectionKey : taskResolutions[i].state;
     // Required even for a section that turns out to have no evidence (the
     // "insufficient" branch below) -- a section must stay isolable by
     // heading regardless of how much content ends up under it, or the

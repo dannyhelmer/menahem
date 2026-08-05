@@ -175,6 +175,38 @@ export function recordDocumentsProvided(diag: RetrievalDiagnostics | undefined, 
   diag.documentsProvided = documents;
 }
 
+// Printed ONCE per question, separate from the per-task printRetrievalDiagnostics
+// blocks below (those run once per buildResearchPacket call -- i.e. once per
+// entity in a multi-entity plan -- so embedding the plan's reasoning there
+// would print it N times redundantly). Structurally typed rather than
+// importing ResearchPlan from lib/research/research-plan.ts, matching this
+// file's existing precedent (see hasOfficialCitation in
+// lib/research/source-attribution.ts) of avoiding a cross-module dependency
+// for a shape this file only ever reads, never constructs.
+export function printResearchPlan(
+  question: string,
+  plan: {
+    topic: string;
+    jurisdiction: string;
+    entityType: string;
+    requestType: string;
+    reasoning: string;
+    entities: { name: string; jurisdiction: string | null }[];
+  },
+): void {
+  if (!shouldTrace()) return;
+  console.group(`[research-plan] "${question.slice(0, 100)}"`);
+  console.log(
+    "Topic:", plan.topic,
+    "| Jurisdiction:", plan.jurisdiction,
+    "| Entity type:", plan.entityType,
+    "| Request type:", plan.requestType,
+  );
+  console.log("Reasoning:", plan.reasoning || "(none given)");
+  console.log(`Candidate entities (${plan.entities.length}):`, plan.entities);
+  console.groupEnd();
+}
+
 // Prints the full retrieval trace: (1) search queries issued, (2) the raw
 // results the search API actually returned, (3) which were filtered out and
 // why, (4) the ranked fetch candidates and their authority scores (why each

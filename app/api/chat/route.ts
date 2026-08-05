@@ -66,6 +66,7 @@ import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
 import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
+import { planResearch } from "@/lib/research/research-plan";
 import {
   enforceSectionCitationScope,
   filterUsedSources,
@@ -76,6 +77,7 @@ import {
 } from "@/lib/research/source-attribution";
 import { sortByAuthority } from "@/lib/research/source-tier";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
+import { printResearchPlan } from "@/lib/search/retrieval-diagnostics";
 
 // Validated-generation queries (see requiresValidatedGeneration below) buffer
 // the full response server-side before sending anything -- retrieval alone
@@ -175,6 +177,12 @@ const SEARCH_TIMEOUT_MS = 26_000;
 // token has arrived the watchdog stands down; a long but ACTIVELY streaming
 // answer is never cut off by this.
 const FIRST_TOKEN_TIMEOUT_MS = 25_000;
+// The research-planning stage (see lib/research/research-plan.ts) is one
+// extra LLM round-trip before search even starts -- it must never be able
+// to hang the whole request. A failure/timeout here falls back to a
+// degenerate plan (zero entities), which every caller treats as "behave
+// exactly like today," so timing out is always safe, never a hard failure.
+const PLANNING_TIMEOUT_MS = 12_000;
 
 class TimeoutError extends Error {}
 
@@ -968,6 +976,35 @@ async function routeMessage(
 
   if (isPoliticalQuestion(politicalIntents)) {
     const { jurisdiction, state } = resolveJurisdictionAndState(text, politicalIntents);
+
+    // Research Planning: understand the question BEFORE any search runs.
+    // Identifies the topic/jurisdiction/entity type/request type and --
+    // critically -- the specific real-world entities (named laws, bills,
+    // cases) this question needs, using the model's own knowledge rather
+    // than relying on a broad search to surface them organically. Confirmed
+    // gap: "Compare the five strongest state consumer privacy laws" names
+    // zero explicit entities, so nothing regex-extractable exists anywhere
+    // in today's pipeline -- this is the fix. Timeout-guarded and falls back
+    // to a zero-entity plan on any failure, which is indistinguishable from
+    // "planning found nothing to add" to the code below -- this stage can
+    // only ever ADD coverage, never regress existing behavior.
+    const plan = await withTimeout(
+      planResearch(text, { jurisdiction, state }, userId),
+      PLANNING_TIMEOUT_MS,
+      "research planning",
+    ).catch((err) => {
+      console.warn("[research-plan] planning failed/timed out, falling back:", err);
+      return {
+        topic: text,
+        jurisdiction,
+        entityType: "other" as const,
+        requestType: "current_status" as const,
+        reasoning: "Planning failed or timed out.",
+        entities: [],
+      };
+    });
+    printResearchPlan(text, plan);
+
     // A broad question naming several independent topics at once (e.g.
     // "Illinois housing laws, Illinois housing bills, federal housing
     // programs, court decisions, housing grants, and policy analysis") gets
@@ -976,9 +1013,20 @@ async function routeMessage(
     // see lib/research/planner.ts. This is NOT the Pro-gated Deep Research
     // mode (a different, much longer report format); it's available to
     // every user as a retrieval-quality improvement for ordinary questions.
-    const isMultiPart = detectMultiPartResearchQuestion(text);
+    // A confident research plan (2+ identified entities) takes priority over
+    // the regex-based detector below -- it catches exactly the cases the
+    // regex can't (no comma/and/or-separated segments in the question at
+    // all, e.g. the state-privacy-laws example above).
+    const hasConfidentEntities = plan.entities.length >= 2;
+    const isMultiPart = hasConfidentEntities || detectMultiPartResearchQuestion(text);
+    const precomputedTasks = hasConfidentEntities
+      ? plan.entities.map((e) => ({
+          task: `${text} Focus specifically on ${e.name}${e.jurisdiction ? ` in ${e.jurisdiction}` : ""}, and answer only for this specific entity.`,
+          sectionKey: e.name,
+        }))
+      : undefined;
     const packet = isMultiPart
-      ? await buildPlannedResearchPacket(text, politicalIntents, jurisdiction, state, onStage, userId)
+      ? await buildPlannedResearchPacket(text, politicalIntents, jurisdiction, state, onStage, userId, precomputedTasks)
       : await buildResearchPacket(text, politicalIntents, jurisdiction, state, { onStage });
 
     liveDataParts.push(packet.liveData);
