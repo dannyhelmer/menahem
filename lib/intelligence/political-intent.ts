@@ -60,8 +60,21 @@ const DEEP_RESEARCH_RE = /\bdeep research\b|\bthorough research\b|\bcomprehensiv
 const COMPARISON_RE =
   /\bcompar(?:e|ing|ison)\b|\bversus\b|\bvs\.?\b|\bdifference between\b|\bwhich (?:one )?is (?:better|worse|stronger|more)\b/i;
 
+// Confirmed gap: "Compare the five strongest state consumer privacy laws"
+// matched NONE of the phrases below -- "law(s)"/"statute(s)" bare were
+// missing entirely (every other legal-record word here already has some
+// form: bills?, legislat\w*, and REGULATIONS_RE/STATE_LEGISLATION_RE cover
+// "regulations"/"state law" elsewhere, but nothing covered a bare "laws"
+// with no "state"/"federal" qualifier immediately in front of it), so the
+// whole question fell through `isPoliticalQuestion` as non-political and
+// never reached the government-research pipeline (or the new research
+// planning stage) at all. Added with one exclusion for the common
+// non-legal idiom "laws of physics/nature/motion/thermodynamics/gravity/
+// attraction" -- everywhere else, "law(s)" on an app whose entire purpose
+// is government/legal research is exactly what this classifier exists to
+// catch, not a word to keep excluded by omission.
 const POLITICAL_RE =
-  /\b(congress(?:man|woman|person)?(?:s)?|senate|senators?|represent(?:ative)?s?|governors?|mayors?|president(?:ial)?|elections?|campaigns?|ballot(?:s|ing)?|primary election|bills?\b|legislat\w*|voting record|voted on|roll[- ]call vote|political part(?:y|ies)|democrats?|republicans?|bipartisan|public official\w*|government agenc\w*|federal agenc\w*|public policy|policy(?:making)?|city council|county (?:commissioner|clerk)|school board|attorney general|state house|state senate|house of representatives|running (?:for|against)|running mate|opponent|incumbent|re-?election|challenger|primary race|general race|who(?:'s|\s+is)\s+\w[\w\s.]{0,40}\s+running)\b/i;
+  /\b(congress(?:man|woman|person)?(?:s)?|senate|senators?|represent(?:ative)?s?|governors?|mayors?|president(?:ial)?|elections?|campaigns?|ballot(?:s|ing)?|primary election|bills?\b|legislat\w*|voting record|voted on|roll[- ]call vote|political part(?:y|ies)|democrats?|republicans?|bipartisan|public official\w*|government agenc\w*|federal agenc\w*|public policy|policy(?:making)?|city council|county (?:commissioner|clerk)|school board|attorney general|state house|state senate|house of representatives|running (?:for|against)|running mate|opponent|incumbent|re-?election|challenger|primary race|general race|who(?:'s|\s+is)\s+\w[\w\s.]{0,40}\s+running|laws?(?!\s+of\s+(?:physics|nature|motion|thermodynamics|gravity|attraction))|statutes?)\b/i;
 
 export function classifyPoliticalIntents(text: string): Set<PoliticalIntent> {
   const intents = new Set<PoliticalIntent>();
