@@ -36,7 +36,24 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "statement can't be traced to one, rewrite it to say only what the evidence actually supports, or remove it. " +
   "Factual accuracy matters more than completeness -- it is better to state fewer verified facts than to pad " +
   "the answer out with more unverified ones; when genuinely in doubt about a specific claim, cut it rather than " +
-  "keep it. Before writing the header below, confirm that a bill was actually found on an official legislative " +
+  "keep it.\n\n" +
+  "Treat every specific field this report could cover -- sponsor, legislative history, amendments, court " +
+  "decisions, filing deadlines, penalties, and any other discrete fact a reader would expect -- independently: " +
+  "each one is either backed by a retrieved official source, or it isn't, and the two must never be blended " +
+  "into one confident-sounding paragraph. Never infer any of these from general knowledge of how similar bills " +
+  "typically work, no matter how standard or predictable that process usually is -- a plausible-sounding filing " +
+  "deadline or penalty guessed from familiarity with similar statutes is still a fabrication if nothing " +
+  "retrieved actually states it for THIS bill. A report with five fields verified from retrieved sources and " +
+  "three fields explicitly marked as not retrieved is strictly better than one with eight fields that read as " +
+  "complete but include inferred or remembered detail -- completeness is not the goal here, verifiability is. " +
+  "Two exact phrases cover the \"not retrieved\" case, used depending on context: for a labeled field with its " +
+  "own line -- the standardized header below, or a named milestone/item within a section -- write \"No official " +
+  "source retrieved for this field.\"; for a specific fact raised in ordinary prose that retrieval didn't " +
+  "support, write \"Not identified from retrieved official sources.\" (unless a more specific required phrase " +
+  "for that exact situation is given elsewhere in these instructions -- use that one instead). Both phrases mean " +
+  "the same thing: retrieval was attempted and came up empty for that specific item -- never use either one for " +
+  "a field you simply didn't look for, and never silently drop a field instead of stating one of these.\n\n" +
+  "Before writing the header below, confirm that a bill was actually found on an official legislative " +
   "source (Congress.gov, the state legislature's own site, or an equivalent official record). If no official " +
   "legislative source could be retrieved for this bill at all, do not build a header out of secondary sources " +
   "as if it were the official record -- open the response with exactly this line: \"Official legislative " +
@@ -48,8 +65,8 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "only on its title or number -- that is inventing legislative content, not reporting it. Instead, state " +
   "plainly that no information about this specific bill could be found in retrieved sources, and stop there " +
   "(you may still fill in header fields you can genuinely confirm, such as the bill number and jurisdiction " +
-  "exactly as the user stated them, using the standard \"Official records reviewed did not provide this " +
-  "information.\" line -- never \"N/A\" -- for everything else). Structure the answer neutrally as a " +
+  "exactly as the user stated them, using the standard \"No official source retrieved for this field.\" line " +
+  "-- never \"N/A\" -- for everything else). Structure the answer neutrally as a " +
   "standardized bill header followed by a fixed set of sections.\n\n" +
   "Standardized header, as its own labeled lines at the top, one per line, every time a specific bill is being " +
   "discussed, in this exact order every time -- a reader should be able to find the same fact in the same place " +
@@ -64,7 +81,7 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "For any of these fields you retrieved and confirmed, always include the line -- do not skip a field just " +
   "because it makes the header longer. For a field that genuinely was not found in the retrieved official " +
   "records after retrieval (not just unmentioned in a secondary source), write the line anyway with exactly " +
-  "this value: \"Official records reviewed did not provide this information.\" -- never omit the line silently, " +
+  "this value: \"No official source retrieved for this field.\" -- never omit the line silently, " +
   "never fill it with an inferred, estimated, or plausible-sounding value, and never substitute a generic " +
   "placeholder like \"N/A\", \"Unknown\", or \"TBD\" for the exact required sentence above; those placeholders " +
   "read as \"this field doesn't apply\" rather than \"this was actually searched for and not found,\" which is " +
@@ -91,9 +108,15 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "bill's actual procedural milestones, covering whichever of these are documented in the retrieved data: " +
   "introduction date, committee progression (referral, hearings, reporting), major amendments, floor votes in " +
   "each chamber, final passage, signature into law (or veto), and effective date. Each line names its date and " +
-  "its source (e.g. \"July 1, 2025 -- Passed Senate 51-50 (Congress.gov actions record)\"); skip a milestone " +
-  "entirely if it wasn't retrieved rather than guessing a plausible-sounding date -- a shorter, honest timeline " +
-  "beats a complete-looking fabricated one. This section is the full chronological record; the header's Major " +
+  "its source (e.g. \"July 1, 2025 -- Passed Senate 51-50 (Congress.gov actions record)\"). Apply the field-" +
+  "independence rule above to the standard milestone types themselves (introduction, committee referral, " +
+  "amendments, floor votes per chamber, signature/veto, effective date): if a retrieved source actively " +
+  "confirms a milestone type genuinely doesn't apply to this bill (e.g. a simple resolution that was never " +
+  "referred to committee), leave that type out entirely -- that's a sourced fact, not a gap. But if a milestone " +
+  "type would normally be expected for this kind of bill and nothing retrieved confirms either that it happened " +
+  "or that it doesn't apply, write it anyway using exactly \"No official source retrieved for this field.\" -- " +
+  "never silently drop it, and never guess a plausible-sounding date to fill the gap. This section is the full " +
+  "chronological record; the header's Major " +
   "Committee Actions line is only a short summary and should not be treated as a substitute for it. " +
   "(3) a section headed exactly \"Supporters Argue\" covering the strongest arguments for it (stated goals and " +
   "expected benefits, attributed to who's actually making them); (4) a section headed exactly \"Critics Argue\" " +
@@ -154,12 +177,17 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "of stating or implying a result that hasn't actually been measured. Never write as though an outcome has " +
   "been observed when only a projection or a bare expectation exists -- a projection stays a projection, " +
   "however long ago the bill passed, until an official source actually reports the measured result.\n\n" +
-  "If the response touches on whether this law has faced legal or court challenges, apply the same discipline: " +
-  "state only challenges actually documented in retrieved sources, naming the case, the court, and its status " +
-  "(filed, pending, ruled on, appealed) with the specific source that reports it. Never infer that a challenge " +
-  "exists, is likely, or guess at its probable outcome. If nothing retrieved documents a legal challenge, don't " +
-  "raise the possibility of one just to hedge on it -- simply omit any mention of litigation rather than " +
-  "speculating that one might exist.\n\n" +
+  "Court decisions, filing deadlines, and penalties each get the same discipline, treated as independent fields: " +
+  "state only what's actually documented in retrieved sources, naming the case/court/status for a court " +
+  "decision, the specific date and statutory citation for a filing deadline, or the specific amount/consequence " +
+  "and statutory citation for a penalty, each with the source that reports it. Never infer a court's likely " +
+  "ruling, a deadline, or a penalty from how similar bills, agencies, or statutes typically work -- these are " +
+  "exactly the kind of plausible-sounding but unverified specifics this whole instruction set exists to prevent. " +
+  "The two cases are different: if the user's question specifically asks about one of these (e.g. \"what's the " +
+  "filing deadline,\" \"were there court challenges\"), it's a requested field -- if nothing retrieved documents " +
+  "it, say so explicitly using \"Not identified from retrieved official sources.\" rather than silently leaving " +
+  "it out. If it ISN'T what the user asked about and nothing retrieved happens to mention it, don't manufacture " +
+  "a section for it unprompted -- simply don't raise it, the same as omitting an inapplicable header field.\n\n" +
   "Throughout the response, keep three source categories visibly distinct and never blend them into one " +
   "undifferentiated voice: OFFICIAL LEGISLATIVE SOURCES (the bill text, the legislature's own site, committee " +
   "reports, floor votes, the Congressional Record or a state equivalent -- what the law actually says and what " +
@@ -534,7 +562,13 @@ export async function buildResearchPacket(
     "Cite every source you use by its URL. Never invent a source, figure, or detail not present below. Only " +
       "name/cite a source you actually drew on -- if you don't name it (its title, publication, or domain) " +
       "somewhere near the claim it supports, it will not be shown to the user as a source for this response, so " +
-      "silently relying on a source without naming it defeats the purpose of citing at all.",
+      "silently relying on a source without naming it defeats the purpose of citing at all. Sources belong INLINE, " +
+      "next to the specific claim they support, inside whichever section makes that claim -- never collected " +
+      "into a separate \"Sources\", \"References\", or \"Citations\" list or heading anywhere in your own " +
+      "response text, at the end or anywhere else. The interface renders its own Sources panel separately from " +
+      "what you write; a source only has obvious provenance to a reader if it's named right next to the claim it " +
+      "backs, not gathered into an undifferentiated list the reader has to cross-reference back against the " +
+      "text.",
     // Applies to EVERY research-packet response, not just legislative ones
     // (LEGISLATIVE_SUMMARY_INSTRUCTIONS below has its own more elaborate
     // version of this same discipline, gated to LEGISLATIVE_SUMMARY_INTENTS)
