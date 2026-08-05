@@ -110,22 +110,68 @@ export async function runSearchForMessage(
 
   let usedProvider: SearchProvider | null = null;
   let results: SearchResult[] = [];
+  // Only populated for an official-domain search (includeDomains set) when a
+  // provider returns results but none actually hit a requested domain --
+  // kept as a last-resort fallback so a genuinely empty final result isn't
+  // returned just because no configured provider happened to surface the
+  // official site, when at least SOMETHING was found.
+  let fallbackProvider: SearchProvider | null = null;
+  let fallbackResults: SearchResult[] = [];
   const failureNotes: string[] = [];
 
   const providerOptions = { preferRecent: options?.preferRecent, includeDomains: options?.includeDomains };
+  const requestedDomains = options?.includeDomains ?? [];
   for (const provider of providers) {
     try {
       const providerResults = await provider.search(query, maxResults, providerOptions);
-      if (providerResults.length > 0) {
+      if (providerResults.length === 0) {
+        failureNotes.push(`${provider.label} returned no results`);
+        continue;
+      }
+      if (requestedDomains.length === 0) {
+        // Not an official-domain search -- the existing behavior: first
+        // provider with any results wins.
         usedProvider = provider;
         results = providerResults;
         break;
       }
-      failureNotes.push(`${provider.label} returned no results`);
+      const hitsOfficialDomain = providerResults.some((r) => {
+        let host: string;
+        try {
+          host = new URL(r.url).hostname.toLowerCase().replace(/^www\./, "");
+        } catch {
+          return false;
+        }
+        return requestedDomains.some((d) => host === d || host.endsWith(`.${d}`));
+      });
+      if (hitsOfficialDomain) {
+        usedProvider = provider;
+        results = providerResults;
+        break;
+      }
+      // Official search, this provider's results don't include the domains
+      // requested -- per the requested Tavily -> Brave/Google/SerpAPI
+      // fallback chain, try the next configured provider instead of
+      // settling for results that don't answer what was specifically asked.
+      console.log(`[orchestrate] ${provider.label} returned results but none matched requested official domain(s) [${requestedDomains.join(", ")}] -- trying next provider`);
+      failureNotes.push(`${provider.label} found results but no official-domain match`);
+      if (!fallbackProvider) {
+        fallbackProvider = provider;
+        fallbackResults = providerResults;
+      }
     } catch (err) {
       console.error(`[orchestrate] provider "${provider.label}" threw:`, err);
       failureNotes.push(`${provider.label}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  if (!usedProvider && fallbackProvider) {
+    console.log(
+      `[orchestrate] no configured provider found an official-domain match -- using ${fallbackProvider.label}'s ` +
+        "results as a fallback (downstream evidence checks still correctly treat this as non-official)",
+    );
+    usedProvider = fallbackProvider;
+    results = fallbackResults;
   }
 
   if (!usedProvider) {
