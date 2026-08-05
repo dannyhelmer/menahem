@@ -535,6 +535,19 @@ export async function buildResearchPacket(
       "name/cite a source you actually drew on -- if you don't name it (its title, publication, or domain) " +
       "somewhere near the claim it supports, it will not be shown to the user as a source for this response, so " +
       "silently relying on a source without naming it defeats the purpose of citing at all.",
+    // Applies to EVERY research-packet response, not just legislative ones
+    // (LEGISLATIVE_SUMMARY_INSTRUCTIONS below has its own more elaborate
+    // version of this same discipline, gated to LEGISLATIVE_SUMMARY_INTENTS)
+    // -- campaign finance, court, and comparison questions need the same
+    // fact/analysis separation a bill summary already gets.
+    "Keep documented facts visibly separate from your own analysis or reasoning about those facts -- never blend " +
+      "the two into one undifferentiated voice. For individual checkable claims (a specific figure, date, vote " +
+      "count, or attributed position) -- not ordinary connecting prose -- tag the claim's evidentiary status " +
+      "inline as **Fact:** (directly stated by a retrieved source), **Projection:** (a forward-looking estimate " +
+      "from a named source), or **Opinion:** (an attributed position, not a verified fact), each followed by a " +
+      "brief confidence note. Tag anything you're inferring or unsure of as **Speculation:**, never presented " +
+      "with the same confidence as a sourced fact. Your own synthesis connecting facts together is allowed and " +
+      "often useful, but must read as clearly yours, not as if it were itself a retrieved fact.",
     "For legislation, ALWAYS search for and prefer official government sources first, in this exact priority " +
       "order. Federally: (1) Congress.gov, (2) House.gov, (3) Senate.gov, (4) the Federal Register, " +
       "(5) govinfo.gov, (6) other federal agency (.gov) sites, (7) SupremeCourt.gov and other federal court " +

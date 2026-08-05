@@ -67,8 +67,16 @@ import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
 import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
-import { filterUsedSources } from "@/lib/research/source-attribution";
+import { filterUsedSources, hasOfficialCitation } from "@/lib/research/source-attribution";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
+
+// Validated-generation queries (see requiresValidatedGeneration below) buffer
+// the full response server-side before sending anything -- retrieval alone
+// (SEARCH_TIMEOUT_MS below) plus a normal-length generation can approach a
+// minute, well past Vercel's un-configured default. No vercel.json exists in
+// this repo, so this route-segment export is the only place that ceiling is
+// controlled; raise it further if the actual deployment plan needs more.
+export const maxDuration = 120;
 
 const POLITICAL_CATEGORY_LABELS: Record<PoliticalIntent, string> = {
   political: "Researching",
@@ -103,6 +111,25 @@ const LABEL_PRIORITY: PoliticalIntent[] = [
 function pickPrimaryIntent(intents: Set<PoliticalIntent>): PoliticalIntent {
   for (const intent of LABEL_PRIORITY) if (intents.has(intent)) return intent;
   return "political";
+}
+
+// Replaces the entire generated response when official sources were
+// retrieved but the model's own text didn't cite any of them -- see the
+// CITATION GATE in POST below. Named/linked so the user can see what WAS
+// found even though the answer couldn't confidently use it; listing each
+// source by title/URL here also means filterUsedSources (which runs right
+// after this) naturally keeps them in the Sources panel without any special
+// casing, since it just checks whether the final text mentions them.
+function buildCitationRejectionMessage(officialSources: { title: string; url: string }[]): string {
+  const list = officialSources.map((s) => `- ${s.title} (${s.url})`).join("\n");
+  return (
+    "This response was withheld. Official sources were retrieved for this question, but the generated answer " +
+    "did not cite any of them -- Menahem does not present unsupported claims as verified, so the response has " +
+    "been discarded rather than shown to you.\n\n" +
+    `Official sources retrieved:\n${list}\n\n` +
+    "Try rephrasing the question, or ask again -- this can happen when a broad question causes the retrieved " +
+    "sources to only partially overlap with what was actually asked."
+  );
 }
 
 // The search phase (provider query + page fetches, now potentially run
@@ -666,6 +693,15 @@ interface RouteOutcome {
   skipModel?: boolean;
   skipModelMessage?: string;
   maxTokens?: number;
+  // True for single-question research/comparison categories (not multi-part,
+  // not deep research -- see the two call sites that set this) where the
+  // generated response must be validated against retrieved official sources
+  // BEFORE anything is sent to the client, rather than streamed token-by-
+  // token. Generation is buffered server-side, checked for an actual
+  // citation to a government-tier source (see hasOfficialCitation), and
+  // rejected outright (not just caveated) if official sources were
+  // retrieved but the response doesn't cite any of them.
+  requiresValidatedGeneration?: boolean;
   // True when this message was routed through a retrieval-grounded path
   // (political research, comparison, deep research, web search). For these,
   // previous conversation turns are stripped from the model's input so stale
@@ -896,6 +932,11 @@ async function routeMessage(
         followups: buildFollowupSuggestions(politicalIntents),
         skipModel: requiresLiveData(text) && packet.retrievalFailed,
         skipModelMessage: packet.retrievalFailureReason,
+        // Comparisons are single-shot (two sides, retrieved and generated
+        // together, no per-section graceful degradation like the multi-part
+        // planner has) -- validate the generated text actually cites the
+        // official sources retrieved for it before sending anything.
+        requiresValidatedGeneration: true,
         grounded: true,
         resolvedUserText: text,
         documentCitationCheck: documentContext?.citationCheck ?? null,
@@ -943,6 +984,11 @@ async function routeMessage(
       // response the way a single-topic low-confidence answer would.
       skipModel: !isMultiPart && requiresLiveData(text) && packet.retrievalFailed,
       skipModelMessage: packet.retrievalFailureReason,
+      // Same reasoning as skipModel above -- the multi-part path already has
+      // its own deliberate per-section graceful-degradation instructions
+      // (see INSUFFICIENT_SECTION_PHRASE in planner.ts) and isn't subject to
+      // an all-or-nothing citation gate on top of that.
+      requiresValidatedGeneration: !isMultiPart,
       grounded: true,
       resolvedUserText: text,
       documentCitationCheck: documentContext?.citationCheck ?? null,
@@ -1231,6 +1277,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
           skipModel,
           skipModelMessage,
           maxTokens,
+          requiresValidatedGeneration,
           grounded,
           resolvedUserText,
           documentCitationCheck,
@@ -1329,35 +1376,79 @@ export const POST = withAuth(async (request, _ctx, user) => {
               (liveData ?? "(none)"),
           );
           const watchdog = createFirstTokenWatchdog(request.signal, FIRST_TOKEN_TIMEOUT_MS);
-          try {
-            const result = await provider.streamChat(
-              fullMessages,
-              (piece) => {
-                watchdog.markFirstToken();
-                assistantText += piece;
-                writeFrame({ type: "token", value: piece });
-              },
-              { signal: watchdog.signal, maxTokens },
+
+          if (requiresValidatedGeneration) {
+            // Buffer the full response instead of streaming it token-by-token
+            // -- nothing reaches the client until it's been validated against
+            // the retrieved official sources (see the citation gate below,
+            // right before usedSources is computed). A heartbeat status frame
+            // keeps the client's stall-detection (which resets on ANY frame,
+            // not just tokens) from false-triggering during the wait.
+            const officialSourceCount = (sources ?? []).filter((s) => "tier" in s && s.tier === "government").length;
+            onStage(
+              `✓ ${officialSourceCount} official source${officialSourceCount === 1 ? "" : "s"} found -- generating report...`,
             );
-            truncated = result.truncated;
-          } catch (err) {
-            if (watchdog.didTimeOut()) {
-              console.error(`[chat] model call timed out after ${FIRST_TOKEN_TIMEOUT_MS}ms with no token`);
-              writeFrame({
-                type: "error",
-                message: "I'm having trouble retrieving a response right now. Please try again in a moment.",
-              });
-              return;
+            const heartbeat = setInterval(() => onStage("Generating report..."), 12_000);
+            try {
+              const result = await provider.streamChat(
+                fullMessages,
+                (piece) => {
+                  watchdog.markFirstToken();
+                  assistantText += piece;
+                },
+                { signal: watchdog.signal, maxTokens },
+              );
+              truncated = result.truncated;
+            } catch (err) {
+              if (watchdog.didTimeOut()) {
+                console.error(`[chat] model call timed out after ${FIRST_TOKEN_TIMEOUT_MS}ms with no token (validated generation)`);
+                writeFrame({
+                  type: "error",
+                  message: "I'm having trouble retrieving a response right now. Please try again in a moment.",
+                });
+                return;
+              }
+              throw err;
+            } finally {
+              watchdog.cleanup();
+              clearInterval(heartbeat);
             }
-            throw err;
-          } finally {
-            watchdog.cleanup();
+            onStage("✓ Validating sources...");
+          } else {
+            try {
+              const result = await provider.streamChat(
+                fullMessages,
+                (piece) => {
+                  watchdog.markFirstToken();
+                  assistantText += piece;
+                  writeFrame({ type: "token", value: piece });
+                },
+                { signal: watchdog.signal, maxTokens },
+              );
+              truncated = result.truncated;
+            } catch (err) {
+              if (watchdog.didTimeOut()) {
+                console.error(`[chat] model call timed out after ${FIRST_TOKEN_TIMEOUT_MS}ms with no token`);
+                writeFrame({
+                  type: "error",
+                  message: "I'm having trouble retrieving a response right now. Please try again in a moment.",
+                });
+                return;
+              }
+              throw err;
+            } finally {
+              watchdog.cleanup();
+            }
           }
         }
 
         if (truncated) {
           assistantText = trimToSentenceBoundary(assistantText);
-          writeFrame({ type: "truncated", content: assistantText });
+          // Buffered mode hasn't sent anything to the client yet -- the
+          // (possibly trimmed) text still needs to go through the citation
+          // gate below before anything is written, so the truncated frame
+          // itself is emitted there instead of here.
+          if (!requiresValidatedGeneration) writeFrame({ type: "truncated", content: assistantText });
         }
 
         // EVIDENCE VALIDATION: post-generation pass that checks the response
@@ -1426,6 +1517,32 @@ export const POST = withAuth(async (request, _ctx, user) => {
             if (!assistantText.includes(notice.trim())) {
               assistantText = assistantText.trimEnd() + notice;
             }
+          }
+        }
+
+        // CITATION GATE (validated-generation path only): everything above
+        // this point has already run against assistantText, so this is the
+        // true final text -- the one and only frame sent to the client for
+        // this path is built from it. If official sources were retrieved but
+        // the generated answer doesn't actually cite one of them, replace it
+        // entirely rather than caveat it -- "official sources exist but this
+        // response ignored them" is exactly the silent-fallback-to-unverified
+        // behavior the validated path exists to prevent.
+        if (requiresValidatedGeneration) {
+          const officialSources = (allSources ?? []).filter(
+            (s): s is TieredSource => "tier" in s && s.tier === "government",
+          );
+          if (officialSources.length > 0 && !hasOfficialCitation(assistantText, officialSources)) {
+            assistantText = buildCitationRejectionMessage(officialSources);
+            truncated = false;
+            onStage("⚠ Response withheld -- no cited official source");
+          } else if (officialSources.length > 0) {
+            onStage(`✓ ${officialSources.length} official source${officialSources.length === 1 ? "" : "s"} cited`);
+          }
+          if (truncated) {
+            writeFrame({ type: "truncated", content: assistantText });
+          } else {
+            writeFrame({ type: "token", value: assistantText });
           }
         }
 

@@ -54,3 +54,18 @@ export function isSourceReferenced(text: string, source: { title: string; url: s
 export function filterUsedSources<T extends AttributableSource>(text: string, sources: T[]): T[] {
   return sources.filter((source) => source.provenance === "always_keep" || isSourceReferenced(text, source));
 }
+
+// A stricter check than filterUsedSources: not just "was ANY source
+// referenced" but specifically "was a GOVERNMENT-tier source referenced."
+// Used by the validated-generation path (app/api/chat/route.ts) to decide
+// whether a generated response that had official sources available to it
+// actually cited one -- retrieval succeeding is not the same claim as the
+// model's own prose having actually drawn on it. Structurally typed (no
+// import of ResearchPacket's TieredSource) to avoid a cross-module
+// dependency between this file and lib/research/packet.ts.
+export function hasOfficialCitation<T extends { title: string; url: string; tier: string }>(
+  text: string,
+  sources: T[],
+): boolean {
+  return sources.some((s) => s.tier === "government" && isSourceReferenced(text, s));
+}
