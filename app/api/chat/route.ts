@@ -986,9 +986,19 @@ async function routeMessage(
     if (detectLearningMode(text)) liveDataParts.push(buildLearningModeGuidance(text));
 
     const primaryIntent = pickPrimaryIntent(politicalIntents);
+    // Keyed off the resolved jurisdiction/state, not primaryIntent ===
+    // "state_legislation" -- resolveJurisdictionAndState's state-branch-noun
+    // override (see lib/intelligence/jurisdiction.ts) can correctly resolve
+    // state jurisdiction from text that never trips the state_legislation
+    // PoliticalIntent itself (e.g. "the Texas legislature" with no literal
+    // "state law" phrase), and primaryIntent can still land on "congress" in
+    // that case (CONGRESS_RE matches the bare word "legislature") even
+    // though the actual search correctly targeted only Texas sources --
+    // this label must track what was actually searched, not the intent
+    // label that happened to win the priority order.
     const label = isMultiPart
       ? "Researching multiple topics"
-      : primaryIntent === "state_legislation" && state
+      : jurisdiction === "state" && state
         ? `Searching ${state} sources`
         : POLITICAL_CATEGORY_LABELS[primaryIntent];
     return {
