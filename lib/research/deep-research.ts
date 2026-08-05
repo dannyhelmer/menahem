@@ -1,5 +1,6 @@
 import { getProvider } from "@/lib/ai/get-provider";
 import type { Jurisdiction } from "@/lib/intelligence/jurisdiction";
+import { resolveJurisdictionAndState } from "@/lib/intelligence/jurisdiction";
 import type { PoliticalIntent } from "@/lib/intelligence/political-intent";
 import { buildConfidenceReason, buildResearchPacket, type ResearchPacket, type TieredSource } from "./packet";
 import { sortByAuthority } from "./source-tier";
@@ -20,8 +21,10 @@ export async function decomposeQuestion(question: string, userId?: string): Prom
     "Break this question into 3-6 focused sub-questions that, together, would fully answer it. " +
     "Think about what dimensions a thorough researcher would cover: the core factual question, " +
     "historical context, current status, key stakeholders or parties involved, relevant data or " +
-    "statistics, comparisons or alternatives, and potential future developments. " +
-    "Reply with ONLY the sub-questions, one per line, no numbering, no explanation.\n\n" +
+    "statistics, comparisons or alternatives, and potential future developments. If the original question " +
+    "named a specific state, jurisdiction, or bill number, restate it explicitly in any sub-question where " +
+    "it's relevant -- each sub-question is researched independently and won't see the others or the original " +
+    "question's own wording. Reply with ONLY the sub-questions, one per line, no numbering, no explanation.\n\n" +
     `Question: ${question}`;
 
   let result = "";
@@ -54,10 +57,23 @@ export async function runDeepResearch(
   const subquestions = await decomposeQuestion(question, userId);
 
   onStage?.("Searching sources");
+  // Fix 2 (per-subtask jurisdiction), deep-research variant: re-resolve
+  // per sub-question, same fallback-to-outer semantics as comparison (sub-
+  // questions are dimensional angles on ONE topic by construction, not
+  // independent topics naming different states, so a sub-question with no
+  // state of its own should still use the outer, whole-question state
+  // rather than falling back to null).
   const packets = await Promise.all(
-    subquestions.map((sub) =>
-      buildResearchPacket(sub, intents, jurisdiction, state, { maxSearchResults: DEEP_RESEARCH_SEARCH_COUNT }),
-    ),
+    subquestions.map((sub) => {
+      const resolved = resolveJurisdictionAndState(sub, intents);
+      return buildResearchPacket(
+        sub,
+        intents,
+        resolved.state ? resolved.jurisdiction : jurisdiction,
+        resolved.state ?? state,
+        { maxSearchResults: DEEP_RESEARCH_SEARCH_COUNT },
+      );
+    }),
   );
 
   onStage?.("Comparing findings");

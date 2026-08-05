@@ -1,7 +1,9 @@
 import { fetchPageText } from "./fetch";
 import { getConfiguredProviders } from "./registry";
+import { stateForDomain } from "./source-router";
 import type { SearchProvider, SearchResult } from "./types";
 import { sourceAuthorityRank, sourceTier } from "@/lib/research/source-tier";
+import { extractAllBillNumbers } from "@/lib/intelligence/bill-number";
 import {
   recordCandidate,
   recordFetchFailure,
@@ -68,9 +70,74 @@ function isSocialMediaUrl(url: string): boolean {
   }
 }
 
+// Fix 3/5 context: what a specific research task is actually about, used to
+// reject candidates that are on an approved domain and non-empty but don't
+// actually answer THIS task -- the audit's "congress.gov/most-viewed-bills"
+// and cross-state "wvlegislature.gov for Virginia" failures both slipped
+// through purely domain-tier-based acceptance with no relevance check at
+// all. taskQuestion is the CLEAN original task text (not a phase's
+// site:-decorated search query), used once to derive significantTerms so
+// both phases of a retry check against the same stable term set.
+export interface TaskContext {
+  state?: string | null;
+  billNumber?: string | null;
+  taskQuestion?: string;
+}
+
+// Dropped so relevance-checking isn't defeated by words that are shared by
+// virtually every legislative question and every legislative-shaped page
+// title (e.g. "bill" alone would match congress.gov/most-viewed-bills
+// against literally any bill-related task, which is exactly the false
+// positive that let it slip through as an accepted "official domain hit").
+const TERM_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "by", "is", "are", "was", "were",
+  "be", "been", "this", "that", "these", "those", "what", "which", "who", "how", "when", "where", "why",
+  "does", "do", "did", "have", "has", "had", "any", "from", "into", "about", "compare", "regulate", "regulates",
+  "law", "laws", "bill", "bills", "act", "acts", "state", "states", "government", "official", "officials",
+  "section", "code", "statute", "statutes",
+]);
+
+function computeSignificantTerms(text: string): string[] {
+  const seen = new Set<string>();
+  for (const raw of text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)) {
+    if (raw.length >= 4 && !TERM_STOPWORDS.has(raw)) seen.add(raw);
+  }
+  return Array.from(seen);
+}
+
+// Fail open, not closed: if nothing survived stopword-filtering (a very
+// short or generic task question), there's nothing meaningful to check
+// overlap against -- treat as relevant rather than rejecting everything.
+// Requires only ONE overlapping term, never a percentage/majority -- a
+// stricter threshold risks killing legitimate results over a single
+// differently-phrased synonym.
+function isTopicallyRelevant(terms: string[], text: string): boolean {
+  if (terms.length === 0) return true;
+  const lower = text.toLowerCase();
+  return terms.some((t) => lower.includes(t));
+}
+
+function hostnameOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
 export interface SearchSource {
   title: string;
   url: string;
+  // True when this page's full text was actually fetched and read; false
+  // when every candidate failed to fetch and the search API's snippet was
+  // used instead (see the snippet-only fallback branch below); undefined
+  // for sources that never go through this fetch path at all (e.g. a
+  // gov-data-provider hit from a structured API). Audit finding: without
+  // this, a snippet-only entry on a government-tier domain (e.g. a dead
+  // congress.gov link) was indistinguishable from a genuinely-fetched one,
+  // so hasSufficientEvidence happily called two unreachable pages
+  // "sufficient evidence."
+  fetchVerified?: boolean;
 }
 
 export interface SearchOutcome {
@@ -109,6 +176,10 @@ export async function runSearchForMessage(
     onProgress?: (update: SearchProgressUpdate) => void;
     diagnostics?: RetrievalDiagnostics;
     diagnosticsPhase?: string;
+    // Fix 3/5: what this specific task is actually about, used to reject
+    // candidates that are on an approved domain and non-empty but don't
+    // answer THIS task -- see TaskContext's own doc comment.
+    taskContext?: TaskContext;
   },
 ): Promise<SearchOutcome> {
   const onProgress = options?.onProgress ?? (() => {});
@@ -232,9 +303,46 @@ export async function runSearchForMessage(
   // often just someone reacting to the actual news) -- excluded entirely
   // rather than merely ranked low, so one doesn't consume a fetch slot
   // that a real secondary source could have used instead.
-  const filtered = results.filter((r) => !isSocialMediaUrl(r.url));
+  //
+  // Fix 5 (jurisdiction validation): reject a result whose domain is a
+  // KNOWN domain belonging to a DIFFERENT state than the one this task is
+  // about (e.g. wvlegislature.gov surfacing for a Virginia query) -- done
+  // here, before ranking, so a wrong-state page can't win a rank slot and
+  // consume one of the MAX_PAGES_TO_FETCH fetch slots a real candidate
+  // could have used. stateForDomain only ever returns a hit for a domain
+  // actually in the verified STATE_OFFICIAL_DOMAINS table, so this never
+  // rejects congress.gov or an unmapped state's page.
+  //
+  // Fix 3 (topical relevance, snippet pass): reject a result with zero
+  // overlap between the task's significant terms and its title+snippet --
+  // this is what catches "congress.gov/most-viewed-bills" and dictionary-
+  // definition pages before they ever burn a fetch slot. Checked again
+  // post-fetch against the full text below, since a short snippet can
+  // mislead in either direction.
+  const taskState = options?.taskContext?.state ?? null;
+  const significantTerms = options?.taskContext?.taskQuestion
+    ? computeSignificantTerms(options.taskContext.taskQuestion)
+    : [];
+  const filtered = results.filter((r) => {
+    if (isSocialMediaUrl(r.url)) return false;
+    const host = hostnameOf(r.url);
+    if (taskState && host) {
+      const domainState = stateForDomain(host);
+      if (domainState && domainState !== taskState) return false;
+    }
+    if (!isTopicallyRelevant(significantTerms, `${r.title} ${r.snippet}`)) return false;
+    return true;
+  });
   for (const r of results) {
-    if (!filtered.includes(r)) recordFiltered(options?.diagnostics, diagPhase, r.url, r.title, "social_media");
+    if (filtered.includes(r)) continue;
+    const host = hostnameOf(r.url);
+    const domainState = host ? stateForDomain(host) : null;
+    const reason = isSocialMediaUrl(r.url)
+      ? "social_media"
+      : taskState && domainState && domainState !== taskState
+        ? "cross_state_domain"
+        : "not_topically_relevant_snippet";
+    recordFiltered(options?.diagnostics, diagPhase, r.url, r.title, reason);
   }
 
   // Sort by source authority before deciding which pages are actually worth
@@ -281,10 +389,33 @@ export async function runSearchForMessage(
     searchPhaseTimeout,
   ]);
 
-  const fetched = (fetchResults ?? [])
+  const rawFetched = (fetchResults ?? [])
     .filter((r): r is PromiseFulfilledResult<{ title: string; url: string; text: string } | null> => r.status === "fulfilled")
     .map((r) => r.value)
     .filter((v): v is { title: string; url: string; text: string } => v !== null);
+
+  // Fix 3 (topical relevance, full-text pass) + Fix 5 (bill/chamber exact
+  // match): a snippet can mislead in either direction, so relevance is
+  // re-checked against the actual fetched text, not just trusted from the
+  // pre-fetch snippet pass. A rejected page is excluded exactly like a real
+  // fetch failure -- it never reaches `sources` or the model's context,
+  // which is the actual fix; Fix 1's citation check is only a backstop for
+  // whatever still gets through.
+  const billNumber = options?.taskContext?.billNumber ?? null;
+  const rejectedUrls = new Set<string>();
+  const fetched = rawFetched.filter((f) => {
+    if (!isTopicallyRelevant(significantTerms, `${f.title} ${f.text}`)) {
+      recordFiltered(options?.diagnostics, diagPhase, f.url, f.title, "not_topically_relevant_fetched");
+      rejectedUrls.add(f.url);
+      return false;
+    }
+    if (billNumber && !extractAllBillNumbers(`${f.title} ${f.text}`).includes(billNumber)) {
+      recordFiltered(options?.diagnostics, diagPhase, f.url, f.title, "bill_number_mismatch");
+      rejectedUrls.add(f.url);
+      return false;
+    }
+    return true;
+  });
 
   console.log(
     `[orchestrate] extracted ${fetched.length}/${candidates.length} documents via ${usedProvider.label}: ` +
@@ -318,7 +449,10 @@ export async function runSearchForMessage(
       lines.push(`\n${index + 1}. ${item.title}\nURL: ${item.url}\n${item.text}`);
     });
 
-    const unfetched = candidates.filter((c) => !fetched.some((f) => f.url === c.url));
+    // Explicitly-rejected candidates (failed relevance/bill-match, not just
+    // a fetch failure) must never leak back in here via their snippet --
+    // that would defeat the entire point of rejecting them post-fetch.
+    const unfetched = candidates.filter((c) => !fetched.some((f) => f.url === c.url) && !rejectedUrls.has(c.url));
     if (unfetched.length > 0) {
       lines.push("\n\nAdditional results (snippet only -- full page couldn't be retrieved):");
       for (const c of unfetched) lines.push(`- ${c.title} (${c.url}): ${c.snippet}`);
@@ -327,7 +461,7 @@ export async function runSearchForMessage(
     return {
       success: true,
       liveData: lines.join("\n"),
-      sources: fetched.map((f) => ({ title: f.title, url: f.url })),
+      sources: fetched.map((f) => ({ title: f.title, url: f.url, fetchVerified: true })),
     };
   }
 
@@ -351,7 +485,7 @@ export async function runSearchForMessage(
   return {
     success: true,
     liveData: lines.join("\n"),
-    sources: candidates.map((c) => ({ title: c.title, url: c.url })),
+    sources: candidates.map((c) => ({ title: c.title, url: c.url, fetchVerified: false })),
   };
 }
 
@@ -395,7 +529,13 @@ export interface SearchWithRetryOutcome extends SearchOutcome {
 // claim from "phase 1's official-domain restriction actually worked."
 function hasSufficientEvidence(sources: SearchSource[] | undefined, requireOfficial = false): boolean {
   if (!sources || sources.length === 0) return false;
-  const hasOfficialHit = sources.some((s) => sourceTier(s.url, s.title) === "government");
+  // fetchVerified !== false admits both `true` (genuinely fetched) and
+  // `undefined` (never went through this fetch path, e.g. a structured
+  // gov-data-provider hit) -- only an explicit `false` (snippet-only,
+  // nothing was actually read) is excluded from counting as a real hit.
+  const hasOfficialHit = sources.some(
+    (s) => sourceTier(s.url, s.title) === "government" && s.fetchVerified !== false,
+  );
   if (requireOfficial) return hasOfficialHit;
   return hasOfficialHit || sources.length >= 3;
 }
@@ -457,6 +597,11 @@ export async function runSearchWithRetry(
     preferOfficial?: PreferOfficial;
     onProgress?: (update: SearchProgressUpdate) => void;
     diagnostics?: RetrievalDiagnostics;
+    // Threaded unchanged into both phase-1 and phase-2 runSearchForMessage
+    // calls via the existing `...options` spreads below -- the same task
+    // context (state/bill/topic) applies to the official-domain-restricted
+    // search AND the broadened secondary-source retry.
+    taskContext?: TaskContext;
   },
 ): Promise<SearchWithRetryOutcome> {
   const firstQuery = options?.preferOfficial

@@ -11,12 +11,11 @@ import { resolveFollowupTopic } from "@/lib/intelligence/conversation-manager";
 import { CRITICISM_GUIDANCE, detectCriticism } from "@/lib/intelligence/criticism";
 import { isFastPathMessage, isSystemTestMessage, SYSTEM_TEST_GUIDANCE } from "@/lib/intelligence/fast-path";
 import {
-  detectJurisdiction,
   detectState,
   hasLocalPlaceHint,
   JURISDICTION_CLARIFICATION_MESSAGE,
   LOCAL_JURISDICTION_CLARIFICATION_MESSAGE,
-  type Jurisdiction,
+  resolveJurisdictionAndState,
 } from "@/lib/intelligence/jurisdiction";
 import { runMathForMessage } from "@/lib/intelligence/math-tool";
 import { extractComparisonTargets } from "@/lib/intelligence/comparison-targets";
@@ -67,7 +66,7 @@ import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
 import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
-import { filterUsedSources, hasOfficialCitation } from "@/lib/research/source-attribution";
+import { filterUsedSources, findFabricatedCitations, hasOfficialCitation } from "@/lib/research/source-attribution";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
 
 // Validated-generation queries (see requiresValidatedGeneration below) buffer
@@ -129,6 +128,24 @@ function buildCitationRejectionMessage(officialSources: { title: string; url: st
     `Official sources retrieved:\n${list}\n\n` +
     "Try rephrasing the question, or ask again -- this can happen when a broad question causes the retrieved " +
     "sources to only partially overlap with what was actually asked."
+  );
+}
+
+// Fix 1 (citation fabrication): replaces the entire generated response when
+// it cites a URL that was never actually retrieved -- a different, more
+// severe failure mode than buildCitationRejectionMessage above ("cited
+// something real, just not an official one" vs. "cited something that
+// doesn't exist in the retrieved evidence at all"). Confirmed in production:
+// a multi-part comparison answer once confidently cited a plausible-
+// sounding flsenate.gov URL that was never in that subtask's retrieved data.
+function buildFabricatedCitationRejectionMessage(fabricatedUrls: string[]): string {
+  const list = fabricatedUrls.map((u) => `- ${u}`).join("\n");
+  return (
+    "This response was withheld. The generated answer cited one or more sources that were never actually " +
+    "retrieved for this question -- Menahem does not present fabricated citations as verified, so the " +
+    "response has been discarded rather than shown to you.\n\n" +
+    `URL(s) cited but not found in retrieved evidence:\n${list}\n\n` +
+    "Try rephrasing the question, or ask again."
   );
 }
 
@@ -642,30 +659,13 @@ async function buildWorkspaceDocumentContext(
   return { text, citationCheck: mergeDocumentCitationContexts(perDocumentContexts, "the workspace's documents") };
 }
 
-// Deterministic (no LLM call) resolution of a short jurisdiction reply
-// ("Illinois") following our own clarification question -- combines it with
-// the original ambiguous question so intent/state detection re-run against
-// the combined text ("Illinois HB 312"). Only the internal routing decision
-// uses the combined text; the real message history sent to the model is
-// untouched.
-// detectJurisdiction's phrase-based check ("governor", "state senate", etc.)
-// doesn't catch a bare state name, so "Illinois HB 312" alone silently falls
-// back to its "federal" default. Once state_legislation intent is already
-// confirmed (a state-shaped bill number matched), a named state alongside it
-// really does mean state jurisdiction -- correct that one case without
-// loosening jurisdiction detection for everything else (a federal bill that
-// happens to mention a state for unrelated reasons should stay federal).
-function resolveJurisdictionAndState(
-  text: string,
-  intents: Set<PoliticalIntent>,
-): { jurisdiction: Jurisdiction; state: string | null } {
-  const jurisdiction = detectJurisdiction(text);
-  if (jurisdiction === "federal" && intents.has("state_legislation")) {
-    const state = detectState(text);
-    if (state) return { jurisdiction: "state", state };
-  }
-  return { jurisdiction, state: jurisdiction === "federal" ? null : detectState(text) };
-}
+// resolveJurisdictionAndState now lives in lib/intelligence/jurisdiction.ts
+// (imported above) -- deterministic (no LLM call) resolution of a short
+// jurisdiction reply ("Illinois") following our own clarification question
+// combines it with the original ambiguous question so intent/state
+// detection re-run against the combined text ("Illinois HB 312"). Only the
+// internal routing decision uses the combined text; the real message
+// history sent to the model is untouched.
 
 const JURISDICTION_CLARIFICATION_MESSAGES = [JURISDICTION_CLARIFICATION_MESSAGE, LOCAL_JURISDICTION_CLARIFICATION_MESSAGE];
 
@@ -1520,6 +1520,42 @@ export const POST = withAuth(async (request, _ctx, user) => {
           }
         }
 
+        // CITATION FABRICATION CHECK (Fix 1): every URL the response cites
+        // must have actually been retrieved -- checked BEFORE the official-
+        // citation gate below, since a response can pass that gate with one
+        // real citation while ALSO fabricating a second URL nobody
+        // retrieved. Gated on `grounded` -- meaningless for fast-path/casual
+        // chat, which never had a retrieval set to check against.
+        let citationRejected = false;
+        if (grounded) {
+          const fabricatedCitations = findFabricatedCitations(assistantText, allSources ?? []);
+          if (fabricatedCitations.length > 0) {
+            console.warn(`[citation-fabrication] fabricated citation(s) detected: ${fabricatedCitations.join(", ")}`);
+            if (requiresValidatedGeneration) {
+              // Nothing sent to the client yet -- replace outright, same
+              // severity as the official-citation gate below. citationRejected
+              // skips that gate entirely so it can't overwrite this message
+              // with its own, different rejection text.
+              assistantText = buildFabricatedCitationRejectionMessage(fabricatedCitations);
+              truncated = false;
+              citationRejected = true;
+              onStage("⚠ Response withheld -- cited a source that was never retrieved");
+            } else {
+              // Tokens may already be streamed (multi-part, deep research,
+              // plain web search) -- full replacement isn't available here;
+              // append a visible correction instead, same established
+              // pattern as the document-citation-verification notice above.
+              const notice =
+                "\n\nNote: this response cited the following URL(s) that could not be verified against " +
+                "retrieved sources -- treat them with caution, they may not be real or accurate:\n" +
+                fabricatedCitations.map((u) => `- ${u}`).join("\n");
+              if (!assistantText.includes(notice.trim())) {
+                assistantText = assistantText.trimEnd() + notice;
+              }
+            }
+          }
+        }
+
         // CITATION GATE (validated-generation path only): everything above
         // this point has already run against assistantText, so this is the
         // true final text -- the one and only frame sent to the client for
@@ -1527,8 +1563,12 @@ export const POST = withAuth(async (request, _ctx, user) => {
         // the generated answer doesn't actually cite one of them, replace it
         // entirely rather than caveat it -- "official sources exist but this
         // response ignored them" is exactly the silent-fallback-to-unverified
-        // behavior the validated path exists to prevent.
-        if (requiresValidatedGeneration) {
+        // behavior the validated path exists to prevent. Skipped entirely
+        // when the fabrication check above already rejected the response --
+        // that rejection message legitimately won't cite any real official
+        // source either, and must not be overwritten by this gate's own,
+        // different-wording rejection.
+        if (requiresValidatedGeneration && !citationRejected) {
           const officialSources = (allSources ?? []).filter(
             (s): s is TieredSource => "tier" in s && s.tier === "government",
           );
@@ -1539,6 +1579,12 @@ export const POST = withAuth(async (request, _ctx, user) => {
           } else if (officialSources.length > 0) {
             onStage(`✓ ${officialSources.length} official source${officialSources.length === 1 ? "" : "s"} cited`);
           }
+        }
+        // The one and only frame sent to the client for the buffered path --
+        // pulled out of the gate above (and no longer conditioned on
+        // !citationRejected) so a fabrication-rejection message still
+        // actually reaches the client instead of silently sending nothing.
+        if (requiresValidatedGeneration) {
           if (truncated) {
             writeFrame({ type: "truncated", content: assistantText });
           } else {

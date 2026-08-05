@@ -69,3 +69,48 @@ export function hasOfficialCitation<T extends { title: string; url: string; tier
 ): boolean {
   return sources.some((s) => s.tier === "government" && isSourceReferenced(text, s));
 }
+
+// Normalizes a URL for comparison purposes only (never for display) --
+// lowercases the host, strips a leading "www." and a single trailing slash.
+// Deliberately leaves path/query untouched: over-normalizing (e.g. ignoring
+// query strings) risks a false negative where two genuinely different pages
+// on the same host get treated as the same citation.
+function normalizeUrlForComparison(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const path = parsed.pathname.replace(/\/$/, "");
+    return `${host}${path}${parsed.search}`;
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+const CITED_URL_RE = /https?:\/\/[^\s)\]}"'<>]+/g;
+
+// Fix 1 (citation fabrication): scans generated text for every URL it
+// actually cites and returns the ones that don't match ANY retrieved
+// source's URL -- the mechanical backstop for "every cited source must
+// originate from retrieved evidence." A response can pass hasOfficialCitation
+// (cites one real official source) while ALSO fabricating a second URL
+// nobody retrieved -- confirmed in production: a multi-part comparison
+// answer cited a plausible-sounding flsenate.gov URL that never appeared
+// anywhere in that subtask's actual retrieved data. Only checks that a
+// cited URL was genuinely retrieved, not that the specific claim next to it
+// is accurate -- verifying claim-level accuracy is a comprehension task for
+// the model's own instructions (see the field-independence rules in
+// packet.ts), not something a URL-matching function can determine.
+export function findFabricatedCitations(text: string, sources: { url: string }[]): string[] {
+  const retrieved = new Set(sources.map((s) => normalizeUrlForComparison(s.url)));
+  const cited = text.match(CITED_URL_RE) ?? [];
+  const fabricated: string[] = [];
+  const seen = new Set<string>();
+  for (const rawUrl of cited) {
+    const url = rawUrl.replace(/[.,;:!?)\]}'"]+$/, "");
+    const normalized = normalizeUrlForComparison(url);
+    if (retrieved.has(normalized) || seen.has(normalized)) continue;
+    seen.add(normalized);
+    fabricated.push(url);
+  }
+  return fabricated;
+}

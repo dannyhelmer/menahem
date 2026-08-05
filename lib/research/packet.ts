@@ -13,6 +13,7 @@ import {
   recordRouterInvocation,
 } from "@/lib/search/retrieval-diagnostics";
 import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
+import { extractBillNumber } from "@/lib/intelligence/bill-number";
 import { dedupeByUrl, sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
 
 const LEGISLATIVE_SUMMARY_INTENTS: PoliticalIntent[] = [
@@ -500,6 +501,13 @@ export async function buildResearchPacket(
     preferOfficial: officialRoute,
     onProgress: onStage ? (update) => onStage(update.label) : undefined,
     diagnostics,
+    // Fix 3/5: every caller (single-question, planner, comparison, deep
+    // research) funnels through this one call, so this single addition
+    // propagates the evidence-validation/jurisdiction/bill filters
+    // everywhere -- but it only rejects wrong-state sources correctly once
+    // `state` here is actually the per-subtask state (Fix 2), not a shared
+    // outer value reused across unrelated subtasks.
+    taskContext: { state, billNumber: extractBillNumber(question), taskQuestion: question },
   });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);

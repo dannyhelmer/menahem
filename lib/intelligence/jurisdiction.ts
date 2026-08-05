@@ -1,6 +1,7 @@
 // Ported from the Python app's tools/political_research: which level of
 // government a question is actually about, and which state if any.
 import { STATE_NAME_TO_CODE } from "@/lib/data/us-states";
+import type { PoliticalIntent } from "@/lib/intelligence/political-intent";
 
 export type Jurisdiction = "federal" | "state" | "local";
 
@@ -28,6 +29,29 @@ export function detectState(text: string): string | null {
   const match = text.match(STATE_NAME_RE);
   if (!match) return null;
   return match[1].replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Combines jurisdiction/state detection with one override: a state bill
+// mentioned without an obvious state-level keyword (detectJurisdiction alone
+// would call it "federal") but that DOES name a state explicitly really does
+// mean state jurisdiction -- correct that one case without loosening
+// jurisdiction detection for everything else (a federal bill that happens to
+// mention a state for unrelated reasons should stay federal). Callers that
+// decompose one question into independent subtasks (each naming its own
+// state) must call this PER SUBTASK, not once for the whole original
+// question -- reusing a single outer resolution across subtasks about
+// different states is exactly the bug this function's per-call granularity
+// exists to avoid.
+export function resolveJurisdictionAndState(
+  text: string,
+  intents: Set<PoliticalIntent>,
+): { jurisdiction: Jurisdiction; state: string | null } {
+  const jurisdiction = detectJurisdiction(text);
+  if (jurisdiction === "federal" && intents.has("state_legislation")) {
+    const state = detectState(text);
+    if (state) return { jurisdiction: "state", state };
+  }
+  return { jurisdiction, state: jurisdiction === "federal" ? null : detectState(text) };
 }
 
 // A bare state-shaped bill number ("HB 312", "Senate Bill 10") with no state

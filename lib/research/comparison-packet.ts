@@ -1,4 +1,5 @@
 import type { Jurisdiction } from "@/lib/intelligence/jurisdiction";
+import { resolveJurisdictionAndState } from "@/lib/intelligence/jurisdiction";
 import type { ComparisonTargets } from "@/lib/intelligence/comparison-targets";
 import type { PoliticalIntent } from "@/lib/intelligence/political-intent";
 import { buildResearchPacket, type TieredSource } from "./packet";
@@ -25,9 +26,31 @@ export async function buildComparisonPacket(
   jurisdiction: Jurisdiction,
   state: string | null,
 ): Promise<ComparisonPacket> {
+  // Fix 2 (per-subtask jurisdiction), comparison variant: re-resolve
+  // jurisdiction/state from EACH side's own text -- "Compare Illinois HB 1
+  // and Texas HB 1" must route each side to its own state's domains, not
+  // whichever state the whole sentence happened to match first. Unlike the
+  // multi-part planner (which falls back to null so an unresolved subtask
+  // gets the safe generic floor), comparison targets are frequently bare
+  // names or bill numbers with no state text of their own ("Compare Jane
+  // Smith and John Doe" for a single state's governor's race) -- there the
+  // outer, whole-question state genuinely is correct for both sides, so
+  // falling back to null here would be a regression, not a safety gain.
+  const resolvedA = resolveJurisdictionAndState(targets.a, intents);
+  const resolvedB = resolveJurisdictionAndState(targets.b, intents);
   const [packetA, packetB] = await Promise.all([
-    buildResearchPacket(targets.a, intents, jurisdiction, state),
-    buildResearchPacket(targets.b, intents, jurisdiction, state),
+    buildResearchPacket(
+      targets.a,
+      intents,
+      resolvedA.state ? resolvedA.jurisdiction : jurisdiction,
+      resolvedA.state ?? state,
+    ),
+    buildResearchPacket(
+      targets.b,
+      intents,
+      resolvedB.state ? resolvedB.jurisdiction : jurisdiction,
+      resolvedB.state ?? state,
+    ),
   ]);
 
   const weakerPacket =

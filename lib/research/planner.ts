@@ -10,6 +10,7 @@
 // being generated -- graceful degradation, not total failure.
 
 import type { Jurisdiction } from "@/lib/intelligence/jurisdiction";
+import { resolveJurisdictionAndState } from "@/lib/intelligence/jurisdiction";
 import type { PoliticalIntent } from "@/lib/intelligence/political-intent";
 import { getProvider } from "@/lib/ai/get-provider";
 import { buildConfidenceReason, buildResearchPacket, type ResearchPacket, type TieredSource } from "./packet";
@@ -58,8 +59,14 @@ export async function planResearchTasks(question: string, userId?: string): Prom
     "This question asks about several independent topics at once. Break it into separate, standalone research " +
     "tasks -- one per distinct topic the user actually named. Do not invent new angles or dimensions beyond " +
     "what's asked; preserve the user's own breakdown. Each task should be phrased as its own complete, " +
-    "self-contained question a researcher could look up on its own. Reply with ONLY the tasks, one per line, " +
-    "no numbering, no explanation.\n\n" +
+    "self-contained question a researcher could look up on its own. If the original question named a specific " +
+    "state, jurisdiction, or bill number for a particular topic, restate that same state/jurisdiction/bill " +
+    "number explicitly in that task's own text -- never rely on another task or the original question to " +
+    "supply it, since each task is researched completely independently and won't see the others. For example, " +
+    "a question comparing \"Illinois, Texas, and Florida\" on one topic must produce tasks that each explicitly " +
+    "say their own state's name (\"...in Illinois\", \"...in Texas\", \"...in Florida\"), not three generic " +
+    "tasks that only the original question's ordering would let you tell apart. Reply with ONLY the tasks, one " +
+    "per line, no numbering, no explanation.\n\n" +
     `Question: ${question}`;
 
   let result = "";
@@ -115,10 +122,28 @@ export async function buildPlannedResearchPacket(
   // others. Each task's own retrieval already retries once internally on
   // weak evidence (buildResearchPacket -> runSearchWithRetry) before it
   // would ever end up here as "insufficient."
+  //
+  // Fix 2 (per-subtask jurisdiction): re-resolve jurisdiction/state from
+  // EACH task's own text instead of reusing the outer, whole-question
+  // resolution for every task -- a 5-state comparison question resolves to
+  // exactly ONE outer state (whichever the whole sentence matched first),
+  // and reusing that for every subtask routed 4 of 5 states' searches at
+  // the wrong state's official domains (the confirmed root cause of the
+  // civil-asset-forfeiture audit). Reuses the outer, already-classified
+  // `intents` Set rather than re-classifying each short task fragment --
+  // a fragment like "the burden-of-proof standard" won't independently
+  // re-trigger the state_legislation intent that resolveJurisdictionAndState
+  // needs to override a bare state name into "state" jurisdiction, so
+  // re-classifying risks silently losing that override. Falls back to null
+  // (the generic .gov/.mil floor), NEVER to the outer state, when a task's
+  // own text doesn't name one -- falling back to the outer state would just
+  // reintroduce the original bug for exactly the tasks whose decomposition
+  // didn't restate their state as instructed above.
   const settled = await Promise.allSettled(
-    tasks.map((task) =>
-      buildResearchPacket(task, intents, jurisdiction, state, { maxSearchResults: PLANNED_SEARCH_COUNT }),
-    ),
+    tasks.map((task) => {
+      const { jurisdiction: taskJurisdiction, state: taskState } = resolveJurisdictionAndState(task, intents);
+      return buildResearchPacket(task, intents, taskJurisdiction, taskState, { maxSearchResults: PLANNED_SEARCH_COUNT });
+    }),
   );
 
   const sections: string[] = [];
@@ -172,7 +197,17 @@ export async function buildPlannedResearchPacket(
       "explicitly as \"General background (not verified via retrieval):\" rather than presenting it as verified " +
       "research. Never speculate about WHY a specific retrieval came back empty -- no claims about website " +
       "blocks, security restrictions, formatting problems, or other technical failures -- unless the retrieval " +
-      "system's own note below explicitly says so.",
+      "system's own note below explicitly says so.\n\n" +
+      `The "${INSUFFICIENT_SECTION_PHRASE}" sentence above covers a WHOLE section with no usable evidence at ` +
+      "all. A narrower case needs different handling: within a section that DOES have sufficient evidence " +
+      "overall, one specific requested field (a sponsor, a specific date, a court decision, a penalty amount, " +
+      "a specific figure) may still have nothing retrieved to support it. For that specific field only, write " +
+      "exactly \"Not verified from retrieved official sources\" in place of a value -- never infer, estimate, " +
+      "or carry over a plausible-sounding value from general knowledge of how similar bills/cases/states " +
+      "typically work, and never silently omit the field instead of stating this. Every cited source must " +
+      "itself be one that was actually retrieved for that section -- never cite a URL, case, or report you " +
+      "did not see in the material below, no matter how plausible or well-known it sounds; treat any citation " +
+      "you're not certain came from the retrieved text as a claim to remove, not a detail to include.",
     ...sections,
   ].join("\n\n---\n\n");
 
