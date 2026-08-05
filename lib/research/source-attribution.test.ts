@@ -5,6 +5,7 @@ import {
   hasOfficialCitation,
   isSourceReferenced,
   scanAndReplaceCitations,
+  stripPlaceholderLinks,
 } from "./source-attribution";
 
 describe("findFabricatedCitations", () => {
@@ -68,6 +69,34 @@ describe("scanAndReplaceCitations", () => {
   it("leaves text with no citations completely unchanged", () => {
     const text = "No citations here at all.";
     expect(scanAndReplaceCitations(text, () => true).text).toBe(text);
+  });
+});
+
+describe("stripPlaceholderLinks", () => {
+  it("flattens a placeholder wrapped in link syntax to plain text", () => {
+    const text = "Innocent owner protections: [Source](Not verified from retrieved official sources).";
+    const { text: result, count } = stripPlaceholderLinks(text);
+    expect(result).toBe("Innocent owner protections: Not verified from retrieved official sources.");
+    expect(count).toBe(1);
+  });
+
+  it("flattens any non-URL href, not just the exact phrase (the model may invent its own wording)", () => {
+    const text = "See [citation](no official source found) for details.";
+    const { text: result, count } = stripPlaceholderLinks(text);
+    expect(result).toBe("See Not verified from retrieved official sources for details.");
+    expect(count).toBe(1);
+  });
+
+  it("leaves a genuine http(s) markdown link untouched", () => {
+    const text = "Per [Florida Statutes](https://www.flsenate.gov/Laws/Statutes/932), the burden is on the state.";
+    const { text: result, count } = stripPlaceholderLinks(text);
+    expect(result).toBe(text);
+    expect(count).toBe(0);
+  });
+
+  it("leaves text with no links at all unchanged", () => {
+    const text = "Not verified from retrieved official sources.";
+    expect(stripPlaceholderLinks(text)).toEqual({ text, count: 0 });
   });
 });
 

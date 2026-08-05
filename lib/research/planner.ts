@@ -229,7 +229,10 @@ export async function buildPlannedResearchPacket(
       "a specific figure) may still have nothing retrieved to support it. For that specific field only, write " +
       "exactly \"Not verified from retrieved official sources\" in place of a value -- never infer, estimate, " +
       "or carry over a plausible-sounding value from general knowledge of how similar bills/cases/states " +
-      "typically work, and never silently omit the field instead of stating this. Every cited source must " +
+      "typically work, and never silently omit the field instead of stating this. Write that sentence as plain " +
+      "text, never as a hyperlink or markdown reference (e.g. never `[Source](Not verified from retrieved " +
+      "official sources)`) -- it is a caveat, not a citation, and dressing it up as a link visually promises a " +
+      "source that does not exist. Every cited source must " +
       "itself be one that was actually retrieved for that section -- never cite a URL, case, or report you " +
       "did not see in the material below, no matter how plausible or well-known it sounds; treat any citation " +
       "you're not certain came from the retrieved text as a claim to remove, not a detail to include. Sources " +

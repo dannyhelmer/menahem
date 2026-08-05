@@ -72,7 +72,9 @@ import {
   findFabricatedCitations,
   hasOfficialCitation,
   scanAndReplaceCitations,
+  stripPlaceholderLinks,
 } from "@/lib/research/source-attribution";
+import { sortByAuthority } from "@/lib/research/source-tier";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
 
 // Validated-generation queries (see requiresValidatedGeneration below) buffer
@@ -1617,6 +1619,23 @@ export const POST = withAuth(async (request, _ctx, user) => {
           assistantText = sectionCorrected;
         }
 
+        // PLACEHOLDER-IN-LINK CHECK: a caveat like "Not verified from
+        // retrieved official sources" must read as plain prose, never as a
+        // hyperlink -- the model sometimes wraps its own hedge in markdown
+        // link syntax (e.g. `[Source](Not verified from retrieved official
+        // sources)`), which the URL-based checks above never touch (their
+        // citation regex requires an http(s) href to begin with) and which
+        // would otherwise reach the client looking like a real, clickable
+        // reference to a source that was never retrieved. Runs for every
+        // grounded response, same as the checks above.
+        if (grounded) {
+          const { text: linkStripped, count } = stripPlaceholderLinks(assistantText);
+          if (count > 0) {
+            console.warn(`[citation-placeholder-link] ${count} placeholder link(s) flattened to plain text`);
+          }
+          assistantText = linkStripped;
+        }
+
         // CITATION GATE (single-question/comparison only, via
         // allowWholeResponseCitationRejection): everything above this point
         // has already run against assistantText, so this is the true final
@@ -1664,8 +1683,13 @@ export const POST = withAuth(async (request, _ctx, user) => {
         // only if it's "always_keep" (a gov-data-provider record or the
         // uploaded document -- known to have informed the response
         // regardless of whether it's named in prose) or if the final text
-        // actually references it (by URL, hostname, or title).
-        const usedSources = filterUsedSources(assistantText, allSources ?? []);
+        // actually references it (by URL, hostname, or title). Re-sorted by
+        // authority explicitly rather than relying on retrieval order: the
+        // packet-based paths already hand `allSources` in authority order,
+        // but plain web search never did, and pruning-then-filtering is not
+        // itself a ranking step -- the displayed Sources list must always
+        // read most-authoritative-first regardless of which path produced it.
+        const usedSources = sortByAuthority(filterUsedSources(assistantText, allSources ?? []));
 
         // Confidence was computed against the full retrieval set before
         // generation; recompute it against what was actually used so the

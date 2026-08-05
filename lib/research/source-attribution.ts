@@ -121,6 +121,32 @@ export function findFabricatedCitations(text: string, sources: { url: string }[]
 // like a model-written one, not like a different, second voice.
 const NOT_VERIFIED_PHRASE = "Not verified from retrieved official sources";
 
+// Matches a markdown link whose href is NOT a real http(s) URL. Every
+// legitimate citation in this app is a full http(s) URL that was actually
+// retrieved -- so a link shaped like `[label](non-url text)` is never a
+// genuine reference, no matter what the label says. Left alone it still
+// renders as a clickable-looking citation in the UI, which is worse than
+// plain caveat prose: it visually promises a source that doesn't exist.
+// This is exactly what happens when the model wraps its own hedge (the
+// NOT_VERIFIED_PHRASE, or an equivalent one it invents) inside link syntax
+// instead of writing it as a plain sentence.
+const NON_URL_LINK_RE = /\[([^\]]+)\]\((?!https?:\/\/)[^)]*\)/g;
+
+// Fix (placeholder-in-link): flattens any markdown link whose href isn't a
+// real URL down to plain NOT_VERIFIED_PHRASE text -- dropping both the
+// label and the bogus href, the same "replace whole, don't patch" approach
+// scanAndReplaceCitations takes for an invalid markdown link. Runs
+// independently of the URL-based checks above (this class of link isn't a
+// citation with a wrong/fabricated URL, it's not a citation at all).
+export function stripPlaceholderLinks(text: string): { text: string; count: number } {
+  let count = 0;
+  const result = text.replace(NON_URL_LINK_RE, () => {
+    count++;
+    return NOT_VERIFIED_PHRASE;
+  });
+  return { text: result, count };
+}
+
 // Matches EITHER a markdown link `[label](url)` (captures label in group 1,
 // url in group 2) OR a bare URL (captures in group 3) -- one shared pattern
 // so scanAndReplaceCitations only has to walk the text once. The markdown
