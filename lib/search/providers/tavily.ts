@@ -26,8 +26,21 @@ export const tavilyProvider: SearchProvider = {
       body.topic = "news";
       body.days = 7;
     }
+    // Tavily's real, documented domain-restriction parameter -- audit
+    // finding: a `site:x OR site:y` clause embedded in the free-text query
+    // (the previous approach, still used for providers without this param)
+    // is not reliably honored by Tavily's semantic/AI search, unlike a
+    // classic keyword index. include_domains is an actual hard filter on
+    // Tavily's side, so this is the real fix rather than hoping the query
+    // text gets parsed as a boolean site restriction.
+    if (options?.includeDomains && options.includeDomains.length > 0) {
+      body.include_domains = options.includeDomains;
+    }
 
-    console.log(`[tavily] search request: query="${query}" maxResults=${maxResults} preferRecent=${Boolean(options?.preferRecent)}`);
+    console.log(
+      `[tavily] search request: query="${query}" maxResults=${maxResults} preferRecent=${Boolean(options?.preferRecent)} ` +
+        `includeDomains=${JSON.stringify(options?.includeDomains ?? [])}`,
+    );
     const response = await fetch("https://api.tavily.com/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

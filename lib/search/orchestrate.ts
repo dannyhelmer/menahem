@@ -3,8 +3,11 @@ import { getConfiguredProviders } from "./registry";
 import type { SearchProvider, SearchResult } from "./types";
 import { sourceAuthorityRank, sourceTier } from "@/lib/research/source-tier";
 import {
+  recordCandidate,
   recordFetchFailure,
   recordFetchSuccess,
+  recordFiltered,
+  recordOfficialDomainCheck,
   recordRawResults,
   recordSearchQuery,
   type RetrievalDiagnostics,
@@ -86,6 +89,7 @@ export async function runSearchForMessage(
   maxResults = 5,
   options?: {
     preferRecent?: boolean;
+    includeDomains?: string[];
     onProgress?: (update: SearchProgressUpdate) => void;
     diagnostics?: RetrievalDiagnostics;
     diagnosticsPhase?: string;
@@ -108,7 +112,7 @@ export async function runSearchForMessage(
   let results: SearchResult[] = [];
   const failureNotes: string[] = [];
 
-  const providerOptions = { preferRecent: options?.preferRecent };
+  const providerOptions = { preferRecent: options?.preferRecent, includeDomains: options?.includeDomains };
   for (const provider of providers) {
     try {
       const providerResults = await provider.search(query, maxResults, providerOptions);
@@ -154,7 +158,12 @@ export async function runSearchForMessage(
     }
   }
 
-  recordRawResults(options?.diagnostics, results);
+  const diagPhase = options?.diagnosticsPhase ?? "search";
+  recordRawResults(options?.diagnostics, diagPhase, results);
+  // The audit's key diagnostic: did the requested official domains actually
+  // come back from the search API at all, regardless of what our own
+  // ranking/filtering does with them afterward.
+  recordOfficialDomainCheck(options?.diagnostics, diagPhase, options?.includeDomains ?? [], results);
 
   // Social-media posts are essentially never a citable source for a
   // government-research platform (no editorial process, easily spoofed,
@@ -162,6 +171,9 @@ export async function runSearchForMessage(
   // rather than merely ranked low, so one doesn't consume a fetch slot
   // that a real secondary source could have used instead.
   const filtered = results.filter((r) => !isSocialMediaUrl(r.url));
+  for (const r of results) {
+    if (!filtered.includes(r)) recordFiltered(options?.diagnostics, diagPhase, r.url, r.title, "social_media");
+  }
 
   // Sort by source authority before deciding which pages are actually worth
   // fetching -- otherwise an official/authoritative source that happened to
@@ -169,6 +181,12 @@ export async function runSearchForMessage(
   // the list is sliced down to MAX_PAGES_TO_FETCH.
   const ranked = filtered.sort((a, b) => sourceAuthorityRank(b.url, b.title) - sourceAuthorityRank(a.url, a.title));
   const candidates = ranked.slice(0, MAX_PAGES_TO_FETCH);
+  for (const r of ranked.slice(MAX_PAGES_TO_FETCH)) {
+    recordFiltered(options?.diagnostics, diagPhase, r.url, r.title, "beyond_fetch_limit");
+  }
+  for (const c of candidates) {
+    recordCandidate(options?.diagnostics, diagPhase, c.url, c.title, sourceAuthorityRank(c.url, c.title));
+  }
 
   onProgress({ label: "Searching trusted government and news sources..." });
 
@@ -181,11 +199,11 @@ export async function runSearchForMessage(
     const { text, error } = await fetchPageText(candidate.url);
     if (text) {
       onProgress({ label: `✓ ${friendlySourceName(candidate.url)}` });
-      recordFetchSuccess(options?.diagnostics, candidate.url, candidate.title);
+      recordFetchSuccess(options?.diagnostics, candidate.url);
       return { title: candidate.title, url: candidate.url, text };
     }
     console.log(`[orchestrate] couldn't extract page text for ${candidate.url}: ${error}`);
-    recordFetchFailure(options?.diagnostics, candidate.url, error ?? "unknown error");
+    recordFetchFailure(options?.diagnostics, candidate.url);
     return null;
   };
 
@@ -294,9 +312,30 @@ export interface SearchWithRetryOutcome extends SearchOutcome {
 // bucket -- a search that only turned up a city page about a state law is
 // correctly treated as insufficient here, so the automatic broadened retry
 // actually fires instead of quietly settling for the local page.
-function hasSufficientEvidence(sources: SearchSource[] | undefined): boolean {
+//
+// requireOfficial is true ONLY for the intermediate phase-1 check inside
+// runSearchWithRetry, when the search was actually restricted to official
+// domains (preferOfficial). Audit finding: the `sources.length >= 3`
+// fallback was letting phase 1 report "sufficient" off of THREE NON-
+// GOVERNMENT results -- which can happen because the site:-operator query
+// restriction isn't reliably honored by every search provider (confirmed:
+// Tavily, the only provider configured in production, has no guarantee of
+// respecting site: syntax embedded in free text -- see includeDomains
+// below for the real fix on the provider side). Without requireOfficial,
+// that false positive skipped phase 2 (the secondary-source fallback)
+// entirely and reported stillWeak=false downstream, even though ZERO
+// official sources were ever actually found -- exactly the "validator
+// treats any retrieved source as sufficient" failure mode this was built
+// to prevent. The FINAL merged-sources check (after phase 2 has already
+// run) intentionally keeps the permissive corroboration-based rule --
+// that one legitimately represents "even a secondary-source-only search
+// found enough independent corroboration," a different and still-valid
+// claim from "phase 1's official-domain restriction actually worked."
+function hasSufficientEvidence(sources: SearchSource[] | undefined, requireOfficial = false): boolean {
   if (!sources || sources.length === 0) return false;
-  return sources.some((s) => sourceTier(s.url, s.title) === "government") || sources.length >= 3;
+  const hasOfficialHit = sources.some((s) => sourceTier(s.url, s.title) === "government");
+  if (requireOfficial) return hasOfficialHit;
+  return hasOfficialHit || sources.length >= 3;
 }
 
 // Strips parentheticals and quoted asides that can over-narrow a query
@@ -363,10 +402,18 @@ export async function runSearchWithRetry(
     : query;
   const first = await runSearchForMessage(firstQuery, maxResults, {
     ...options,
+    // Real domains only (e.g. "congress.gov", "ilga.gov") -- excludes the
+    // generic ["gov", "mil"] TLD-only floor (DEFAULT_OFFICIAL_DOMAINS in
+    // source-router.ts), which is unverified as a valid Tavily
+    // include_domains pattern and isn't worth risking a regression on: the
+    // `site:gov OR site:mil` text clause in the query itself is the
+    // existing, already-working behavior for that generic case, unchanged
+    // here. A real apex domain always contains a dot; a bare TLD never does.
+    includeDomains: options?.preferOfficial?.domains.filter((d) => d.includes(".")),
     diagnosticsPhase: options?.preferOfficial ? "official (phase 1)" : "search",
   });
 
-  if (hasSufficientEvidence(first.sources)) {
+  if (hasSufficientEvidence(first.sources, Boolean(options?.preferOfficial))) {
     return { ...first, retried: false, stillWeak: false };
   }
 
