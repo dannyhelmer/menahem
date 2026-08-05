@@ -5,11 +5,17 @@ import type { GovDataProvider } from "@/lib/gov-data/types";
 import { getConnectedEntities } from "@/lib/graph/store";
 import { getTimeline } from "@/lib/timeline/store";
 import { runSearchWithRetry } from "@/lib/search/orchestrate";
-import { isSpecificRoute, selectOfficialDomains } from "@/lib/search/source-router";
+import {
+  classifyJurisdictionRouting,
+  isSpecificRoute,
+  selectOfficialDomains,
+  type JurisdictionRouting,
+} from "@/lib/search/source-router";
 import {
   maybeCreateRetrievalDiagnostics,
   printRetrievalDiagnostics,
   recordDocumentsProvided,
+  recordJurisdictionRouting,
   recordRouterInvocation,
 } from "@/lib/search/retrieval-diagnostics";
 import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
@@ -419,8 +425,12 @@ export function buildConfidenceReason(
     : `${basis}\nCorroborated by an official government source alongside others.`;
 }
 
-function selectGovProviders(intents: Set<PoliticalIntent>, jurisdiction: Jurisdiction): GovDataProvider[] {
-  if (jurisdiction !== "federal") return [];
+function selectGovProviders(intents: Set<PoliticalIntent>, routing: JurisdictionRouting): GovDataProvider[] {
+  // Deferring to the classifier's verdict (rather than a bare `jurisdiction
+  // !== "federal"` check) means a "mixed" state-plus-explicit-federal-
+  // comparison question also gets the structured Congress.gov/FEC providers,
+  // not just the web-search domain bias below.
+  if (!routing.includeFederalSources) return [];
   const providers: GovDataProvider[] = [];
   const congress = GOV_DATA_PROVIDERS.find((p) => p.id === "congress");
   const fec = GOV_DATA_PROVIDERS.find((p) => p.id === "fec");
@@ -452,8 +462,15 @@ export async function buildResearchPacket(
   // not a marker of work this function itself performs.
   onStage?.("✓ Determining jurisdiction");
 
-  const providers = selectGovProviders(intents, jurisdiction);
-  const officialRoute = selectOfficialDomains(intents, jurisdiction, state, question);
+  // Jurisdiction-aware routing classifier: runs before any provider is
+  // selected or a search executes, and decides once whether federal sources
+  // belong in THIS search at all -- both selectGovProviders (structured
+  // APIs) and selectOfficialDomains (web-search domain bias) defer to it.
+  const routing = classifyJurisdictionRouting(question, intents, jurisdiction, state);
+  recordJurisdictionRouting(diagnostics, routing);
+
+  const providers = selectGovProviders(intents, routing);
+  const officialRoute = selectOfficialDomains(intents, routing, question);
   recordRouterInvocation(diagnostics, officialRoute.domains, officialRoute.labels);
   onStage?.("✓ Identifying official sources");
 

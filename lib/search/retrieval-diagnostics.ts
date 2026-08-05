@@ -11,6 +11,17 @@ function shouldTrace(): boolean {
 }
 
 export interface RetrievalDiagnostics {
+  // (0) The jurisdiction-aware routing verdict, recorded BEFORE any provider
+  // is selected or a search executes -- the direct answer to "why weren't
+  // federal sources used for this state query" (or the reverse).
+  jurisdictionRouting?: {
+    jurisdiction: string;
+    state: string | null;
+    scope: string;
+    includeFederalSources: boolean;
+    excludedFederalLabels: string[];
+    reason: string;
+  };
   routerInvoked: boolean;
   officialDomains: string[];
   officialLabels: string[];
@@ -59,6 +70,21 @@ export function createRetrievalDiagnostics(): RetrievalDiagnostics {
 // through; every record* function below already tolerates undefined.
 export function maybeCreateRetrievalDiagnostics(): RetrievalDiagnostics | undefined {
   return shouldTrace() ? createRetrievalDiagnostics() : undefined;
+}
+
+export function recordJurisdictionRouting(
+  diag: RetrievalDiagnostics | undefined,
+  routing: {
+    jurisdiction: string;
+    state: string | null;
+    scope: string;
+    includeFederalSources: boolean;
+    excludedFederalLabels: string[];
+    reason: string;
+  },
+): void {
+  if (!diag) return;
+  diag.jurisdictionRouting = routing;
 }
 
 export function recordRouterInvocation(diag: RetrievalDiagnostics | undefined, domains: string[], labels: string[]): void {
@@ -159,6 +185,15 @@ export function recordDocumentsProvided(diag: RetrievalDiagnostics | undefined, 
 export function printRetrievalDiagnostics(question: string, diag: RetrievalDiagnostics): void {
   if (!shouldTrace()) return;
   console.group(`[retrieval-diagnostics] "${question.slice(0, 100)}"`);
+  if (diag.jurisdictionRouting) {
+    const r = diag.jurisdictionRouting;
+    console.log(
+      `(0) Jurisdiction routing: jurisdiction=${r.jurisdiction} state=${r.state ?? "none"} scope=${r.scope} ` +
+        `includeFederalSources=${r.includeFederalSources}` +
+        (r.excludedFederalLabels.length > 0 ? ` excluded=[${r.excludedFederalLabels.join(", ")}]` : "") +
+        ` -- ${r.reason}`,
+    );
+  }
   console.log("Domain router invoked:", diag.routerInvoked, "| official domains:", diag.officialDomains, "| labels:", diag.officialLabels);
   console.log("(1) Search queries issued:", diag.searchQueries);
   console.log(`(2) Raw results returned by the search API (${diag.rawResults.length} total):`, diag.rawResults);

@@ -1,6 +1,48 @@
 import type { Jurisdiction } from "@/lib/intelligence/jurisdiction";
 import type { PoliticalIntent } from "@/lib/intelligence/political-intent";
 
+// Jurisdiction-aware routing classifier, run BEFORE any provider is
+// selected or a search is executed. The bug this exists to fix: several
+// PoliticalIntents that gate FEDERAL_TOPIC_DOMAINS below (`congress` in
+// particular -- CONGRESS_RE matches the bare word "legislature") fire on
+// perfectly ordinary STATE-legislation questions ("the Illinois
+// legislature passed...", "Texas's state courts"), which had been silently
+// merging congress.gov/house.gov/senate.gov/supremecourt.gov into a state
+// query's search domains. Confirmed in production: a 5-state civil-asset-
+// forfeiture comparison had Congress.gov, House.gov, Senate.gov,
+// supremecourt.gov, and courtlistener.com all present in Texas's own
+// includeDomains list. classifyJurisdictionRouting is the single place that
+// decides whether federal sources belong in THIS query's search at all --
+// selectGovProviders and selectOfficialDomains both defer to its verdict
+// rather than re-deriving it themselves.
+export type JurisdictionScope = "federal" | "state" | "local" | "mixed";
+
+export interface JurisdictionRouting {
+  jurisdiction: Jurisdiction;
+  state: string | null;
+  // "mixed" means state/local jurisdiction BUT the question explicitly also
+  // asks about federal law or a federal comparison -- the one case where
+  // federal sources belong in an otherwise state/local search.
+  scope: JurisdictionScope;
+  includeFederalSources: boolean;
+  // Which federal-topic labels (Congress.gov, Supreme Court, etc.) were
+  // excluded from this search -- populated only when includeFederalSources
+  // is false, purely for DEBUG_RETRIEVAL visibility into what was held back
+  // and why.
+  excludedFederalLabels: string[];
+  reason: string;
+}
+
+// A state/local question is only ALSO a federal one when it explicitly says
+// so -- naming a federal law/statute/court/agency by category, "act of
+// Congress"/"Congress passed", or comparing the state's law against the
+// federal one. Deliberately does NOT match on bare "Congress"/"Senate"/
+// "House of Representatives"/"legislature" (see CONGRESS_RE in
+// political-intent.ts) -- those words alone describe a STATE legislature
+// just as often as the federal one and are exactly what caused the bug.
+const EXPLICIT_FEDERAL_RE =
+  /\bfederal (law\w*|legislation|bill\w*|statute\w*|regulation\w*|rule\w*|court\w*|agenc\w*|government|comparison)\b|\bact of congress\b|\bcongress passed\b|\b(?:compar\w+|versus|vs\.?)\b[^.?!]{0,50}\bfederal\b|\bfederal\b[^.?!]{0,50}\b(?:compar\w+|versus|vs\.?)\b/i;
+
 // The default retrieval architecture for government-research queries: given
 // what's being asked and where, decide which SPECIFIC official domains the
 // search phase should be biased toward, rather than the generic
@@ -37,6 +79,51 @@ const FEDERAL_TOPIC_DOMAINS: Partial<Record<PoliticalIntent, OfficialSourceRoute
   regulations: route(["federalregister.gov", "reginfo.gov"], ["Federal Register", "reginfo.gov"]),
   executive_branch: route(["whitehouse.gov", "federalregister.gov"], ["White House", "Federal Register"]),
 };
+
+function allFederalTopicLabels(): string[] {
+  const labels = new Set<string>();
+  for (const r of Object.values(FEDERAL_TOPIC_DOMAINS)) {
+    for (const l of r.labels) labels.add(l);
+  }
+  return Array.from(labels);
+}
+
+// The jurisdiction-aware routing classifier itself. Takes the same
+// jurisdiction/state resolution every caller already computes up front (see
+// resolveJurisdictionAndState) and decides, once, whether federal sources
+// belong in this specific search -- every downstream consumer
+// (selectGovProviders' structured-API call, selectOfficialDomains' web-
+// search domain bias) defers to this single verdict instead of separately
+// re-deriving it from raw intents.
+export function classifyJurisdictionRouting(
+  questionText: string,
+  intents: Set<PoliticalIntent>,
+  jurisdiction: Jurisdiction,
+  state: string | null,
+): JurisdictionRouting {
+  if (jurisdiction === "federal") {
+    return {
+      jurisdiction,
+      state,
+      scope: "federal",
+      includeFederalSources: true,
+      excludedFederalLabels: [],
+      reason: "question is about federal government -- federal sources included",
+    };
+  }
+
+  const explicitFederalAsk = intents.has("federal_legislation") || EXPLICIT_FEDERAL_RE.test(questionText);
+  return {
+    jurisdiction,
+    state,
+    scope: explicitFederalAsk ? "mixed" : jurisdiction,
+    includeFederalSources: explicitFederalAsk,
+    excludedFederalLabels: explicitFederalAsk ? [] : allFederalTopicLabels(),
+    reason: explicitFederalAsk
+      ? `${jurisdiction} jurisdiction, but the question explicitly also asks about federal law/comparison -- federal sources included alongside ${state ?? "the"} ${jurisdiction} sources`
+      : `${jurisdiction} jurisdiction with no explicit federal request -- federal legislative/regulatory/court sources excluded from the initial search`,
+  };
+}
 
 // Keyword-triggered add-ons for topics that aren't full PoliticalIntents in
 // their own right (promoting them would change response SHAPE elsewhere in
@@ -197,20 +284,27 @@ function asArray(value: string | string[] | undefined): string[] {
 
 export function selectOfficialDomains(
   intents: Set<PoliticalIntent>,
-  jurisdiction: Jurisdiction,
-  state: string | null,
+  routing: JurisdictionRouting,
   questionText: string,
 ): OfficialSourceRoute {
+  const { jurisdiction, state } = routing;
   const matched: OfficialSourceRoute[] = [];
 
-  for (const [intent, topicRoute] of Object.entries(FEDERAL_TOPIC_DOMAINS)) {
-    if (intents.has(intent as PoliticalIntent)) matched.push(topicRoute);
+  // Every federal-domain add below (topic-keyed routes, Grants.gov, HUD, the
+  // federal budget route) is gated on the classifier's verdict, not
+  // re-derived from raw intents here -- a state/local question with no
+  // explicit federal ask must never pull in a federal domain no matter which
+  // specific keyword/intent would otherwise have matched it.
+  if (routing.includeFederalSources) {
+    for (const [intent, topicRoute] of Object.entries(FEDERAL_TOPIC_DOMAINS)) {
+      if (intents.has(intent as PoliticalIntent)) matched.push(topicRoute);
+    }
+    if (GRANTS_RE.test(questionText)) matched.push(route(["grants.gov"], ["Grants.gov"]));
+    if (HOUSING_RE.test(questionText)) {
+      matched.push(route(["hud.gov"], ["HUD"]));
+    }
+    if (jurisdiction === "federal" && intents.has("budget")) matched.push(FEDERAL_BUDGET_ROUTE);
   }
-  if (GRANTS_RE.test(questionText)) matched.push(route(["grants.gov"], ["Grants.gov"]));
-  if (HOUSING_RE.test(questionText)) {
-    matched.push(route(["hud.gov"], ["HUD"]));
-  }
-  if (jurisdiction === "federal" && intents.has("budget")) matched.push(FEDERAL_BUDGET_ROUTE);
 
   if (jurisdiction !== "federal" && state) {
     const stateDomains = STATE_OFFICIAL_DOMAINS[state];
