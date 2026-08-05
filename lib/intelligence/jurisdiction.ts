@@ -51,6 +51,17 @@ export function detectState(text: string): string | null {
 const STATE_BRANCH_NOUN_RE =
   /\blegislature\b|\bgeneral assembly\b|\battorney general\b|\bgovernor'?s?\b|\bstate courts?\b|\bstate supreme court\b|\b(?:house|senate) bill \d+\b|\bhb\s?\d+\b|\bsb\s?\d+\b/i;
 
+// A named state explicitly compared to federal law is unambiguously a state
+// question too, not just a federal one -- "How does Illinois's law compare
+// to federal law?" names no legislature/governor/AG/court (so
+// STATE_BRANCH_NOUN_RE alone doesn't catch it) but is exactly the "mixed"
+// scope classifyJurisdictionRouting exists to handle, and needs state
+// jurisdiction resolved here first so Illinois's own sources get searched
+// alongside the federal ones. Scoped narrowly to comparison phrasing
+// specifically (not any federal mention) to avoid the same false-positive
+// risk STATE_BRANCH_NOUN_RE already guards against.
+const COMPARISON_HINT_RE = /\bcompar\w+\b|\bversus\b|\bvs\.?\b/i;
+
 // Combines jurisdiction/state detection with an override: a state bill or
 // state-branch noun mentioned without an obvious "state ___" phrase
 // (detectJurisdiction alone would call it "federal") but that DOES name a
@@ -75,7 +86,12 @@ export function resolveJurisdictionAndState(
   const jurisdiction = detectJurisdiction(text);
   if (jurisdiction === "federal") {
     const state = detectState(text);
-    if (state && (intents.has("state_legislation") || STATE_BRANCH_NOUN_RE.test(text))) {
+    if (
+      state &&
+      (intents.has("state_legislation") ||
+        STATE_BRANCH_NOUN_RE.test(text) ||
+        (intents.has("federal_legislation") && COMPARISON_HINT_RE.test(text)))
+    ) {
       return { jurisdiction: "state", state };
     }
   }

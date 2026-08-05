@@ -40,6 +40,30 @@ describe("resolveJurisdictionAndState", () => {
     expect(result).toEqual({ jurisdiction: "federal", state: null });
   });
 
+  it("resolves state jurisdiction for a named state explicitly compared to federal law, with no branch noun present", () => {
+    // The confirmed follow-on gap: this phrasing has no legislature/
+    // governor/AG/court/bill-number, so STATE_BRANCH_NOUN_RE alone misses
+    // it, but "Illinois's law compare to federal law" is unambiguously
+    // also an Illinois question -- needed so classifyJurisdictionRouting's
+    // "mixed" scope actually has a state to search alongside federal.
+    const result = resolveJurisdictionAndState(
+      "How does Illinois's civil asset forfeiture law compare to federal law?",
+      intentSet("federal_legislation"),
+    );
+    expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
+  });
+
+  it("does NOT resolve state jurisdiction for a named state with a federal signal but no comparison framing", () => {
+    // Contrast with the case above -- an incidental state mention in a
+    // federal-legislation question, with no "compare"/"versus" framing,
+    // should stay federal (same rationale as the farmers example below).
+    const result = resolveJurisdictionAndState(
+      "The federal law signed today mentions funding for Texas infrastructure.",
+      intentSet("federal_legislation"),
+    );
+    expect(result).toEqual({ jurisdiction: "federal", state: null });
+  });
+
   it("still resolves state jurisdiction even when a federal signal is also present -- a mixed question", () => {
     // classifyJurisdictionRouting (source-router.ts) is what decides whether
     // federal sources ALSO belong in a mixed question's search -- this
