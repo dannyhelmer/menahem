@@ -31,25 +31,53 @@ export function detectState(text: string): string | null {
   return match[1].replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// Combines jurisdiction/state detection with one override: a state bill
-// mentioned without an obvious state-level keyword (detectJurisdiction alone
-// would call it "federal") but that DOES name a state explicitly really does
-// mean state jurisdiction -- correct that one case without loosening
-// jurisdiction detection for everything else (a federal bill that happens to
-// mention a state for unrelated reasons should stay federal). Callers that
-// decompose one question into independent subtasks (each naming its own
-// state) must call this PER SUBTASK, not once for the whole original
-// question -- reusing a single outer resolution across subtasks about
-// different states is exactly the bug this function's per-call granularity
-// exists to avoid.
+// A state name paired with an unambiguous state-government-branch noun
+// (legislature, general assembly, attorney general, governor, state court,
+// or an HB/SB-style state bill number) is state jurisdiction even when the
+// text never uses the literal word "state" -- "the Texas legislature" and
+// "the Illinois Attorney General" are exactly as state-specific as "the
+// state legislature", they just name the state instead of saying "state".
+// Confirmed gap: "I am a Texas state policymaker. What does the Texas
+// legislature's recent reform of civil asset forfeiture law say..." has no
+// literal "state legislature"/"state law" phrase anywhere, so neither
+// detectJurisdiction nor the state_legislation PoliticalIntent fired, and
+// the question fell through to the federal default -- sending its search
+// to Congress.gov/House.gov/Senate.gov instead of Texas's own sources.
+// Deliberately narrower than a generic legislative-content match (excludes
+// bare "law"/"bill"/"committee"/"court", all of which describe federal
+// government just as often) to avoid misreading an incidental state
+// mention in an otherwise-federal question (e.g. "the president signed a
+// law affecting Texas farmers") as a state-jurisdiction query.
+const STATE_BRANCH_NOUN_RE =
+  /\blegislature\b|\bgeneral assembly\b|\battorney general\b|\bgovernor'?s?\b|\bstate courts?\b|\bstate supreme court\b|\b(?:house|senate) bill \d+\b|\bhb\s?\d+\b|\bsb\s?\d+\b/i;
+
+// Combines jurisdiction/state detection with an override: a state bill or
+// state-branch noun mentioned without an obvious "state ___" phrase
+// (detectJurisdiction alone would call it "federal") but that DOES name a
+// state explicitly really does mean state jurisdiction -- correct that case
+// without loosening jurisdiction detection for everything else (a federal
+// bill that happens to mention a state for unrelated reasons should stay
+// federal). Deliberately does NOT also require the absence of a federal
+// signal: a genuinely mixed question ("the Texas Attorney General's stance
+// compared to federal law") still needs state jurisdiction (and Texas's own
+// state field populated) so its state-specific sources get searched --
+// whether federal sources ALSO belong in that same search is a separate
+// decision made downstream by classifyJurisdictionRouting, not this
+// function. Callers that decompose one question into independent subtasks
+// (each naming its own state) must call this PER SUBTASK, not once for the
+// whole original question -- reusing a single outer resolution across
+// subtasks about different states is exactly the bug this function's
+// per-call granularity exists to avoid.
 export function resolveJurisdictionAndState(
   text: string,
   intents: Set<PoliticalIntent>,
 ): { jurisdiction: Jurisdiction; state: string | null } {
   const jurisdiction = detectJurisdiction(text);
-  if (jurisdiction === "federal" && intents.has("state_legislation")) {
+  if (jurisdiction === "federal") {
     const state = detectState(text);
-    if (state) return { jurisdiction: "state", state };
+    if (state && (intents.has("state_legislation") || STATE_BRANCH_NOUN_RE.test(text))) {
+      return { jurisdiction: "state", state };
+    }
   }
   return { jurisdiction, state: jurisdiction === "federal" ? null : detectState(text) };
 }
