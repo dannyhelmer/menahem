@@ -139,21 +139,45 @@ export async function buildPlannedResearchPacket(
   // own text doesn't name one -- falling back to the outer state would just
   // reintroduce the original bug for exactly the tasks whose decomposition
   // didn't restate their state as instructed above.
+  // Resolved once and reused below (both for the search call and for the
+  // section heading each task must use) -- see the sectionKey handling in
+  // the forEach below for why this needs to survive past the search call.
+  const taskResolutions = tasks.map((task) => resolveJurisdictionAndState(task, intents));
   const settled = await Promise.allSettled(
-    tasks.map((task) => {
-      const { jurisdiction: taskJurisdiction, state: taskState } = resolveJurisdictionAndState(task, intents);
+    tasks.map((task, i) => {
+      const { jurisdiction: taskJurisdiction, state: taskState } = taskResolutions[i];
       return buildResearchPacket(task, intents, taskJurisdiction, taskState, { maxSearchResults: PLANNED_SEARCH_COUNT });
     }),
   );
 
   const sections: string[] = [];
   const allSources: TieredSource[] = [];
+  // Per-section source scoping: only tasks with a resolved state get a
+  // section key -- this is specifically about state-decomposed questions
+  // (the confirmed cross-state citation-reuse case), not every possible
+  // multi-part decomposition. A task with no state still contributes its
+  // sources to the merged pool above, just without cross-section
+  // enforcement, matching this feature's scoped intent.
+  const packetSections: { key: string; sources: TieredSource[] }[] = [];
 
   settled.forEach((result, i) => {
     const task = tasks[i];
+    const sectionKey = taskResolutions[i].state;
+    // Required even for a section that turns out to have no evidence (the
+    // "insufficient" branch below) -- a section must stay isolable by
+    // heading regardless of how much content ends up under it, or the
+    // post-generation section-scope validator has nothing to split on.
+    const headingInstruction = sectionKey
+      ? `Before writing anything else for this task, start with a level-2 markdown heading that is EXACTLY ` +
+        `"## ${sectionKey}" on its own line, with nothing else on that line -- no extra words, no bill name, ` +
+        "no punctuation. Cite ONLY sources listed for THIS specific task below -- never a source that belongs " +
+        "to a different section, even if it's genuinely official; a citation is checked against this response " +
+        "before it's shown to anyone, and one borrowed from another section will be caught and replaced.\n\n"
+      : "";
     if (result.status === "fulfilled") {
       const packet = result.value;
       allSources.push(...packet.sources);
+      if (sectionKey) packetSections.push({ key: sectionKey, sources: packet.sources });
       const weaknessNote =
         packet.confidence === "low"
           ? "\n\nThis section's evidence was insufficient even after an automatic broadened retry -- write " +
@@ -162,11 +186,12 @@ export async function buildPlannedResearchPacket(
             "background (not verified via retrieval):\" first -- never blend it into the answer as if it were " +
             "sourced, and never let this section's weakness affect how you write any OTHER section."
           : "";
-      sections.push(`Research task: ${task}\n\n${packet.liveData}${weaknessNote}`);
+      sections.push(`${headingInstruction}Research task: ${task}\n\n${packet.liveData}${weaknessNote}`);
     } else {
+      if (sectionKey) packetSections.push({ key: sectionKey, sources: [] });
       sections.push(
-        `Research task: ${task}\n\n[This specific research task could not be completed due to an unexpected ` +
-          `retrieval error. Write exactly this sentence for this part of the answer: ` +
+        `${headingInstruction}Research task: ${task}\n\n[This specific research task could not be completed due ` +
+          `to an unexpected retrieval error. Write exactly this sentence for this part of the answer: ` +
           `"${INSUFFICIENT_SECTION_PHRASE}" Do not speculate about the cause -- no claims about the site ` +
           "blocking automated access, security restrictions, or a formatting problem, unless the retrieval " +
           "system explicitly reported that as the reason (it did not here). Then continue with the other " +
@@ -207,7 +232,12 @@ export async function buildPlannedResearchPacket(
       "typically work, and never silently omit the field instead of stating this. Every cited source must " +
       "itself be one that was actually retrieved for that section -- never cite a URL, case, or report you " +
       "did not see in the material below, no matter how plausible or well-known it sounds; treat any citation " +
-      "you're not certain came from the retrieved text as a claim to remove, not a detail to include.",
+      "you're not certain came from the retrieved text as a claim to remove, not a detail to include. Sources " +
+      "are SECTION-SCOPED: a source retrieved for one section (e.g. Florida) must never be cited in a " +
+      "different section's part of the answer (e.g. Virginia), even though it's genuinely official and even " +
+      "though every section's sources are listed together below -- each section's own material is the only " +
+      "material that section may cite. This is checked mechanically after you write the response, and any " +
+      "citation borrowed from another section will be caught and replaced before anyone sees it.",
     ...sections,
   ].join("\n\n---\n\n");
 
@@ -232,5 +262,6 @@ export async function buildPlannedResearchPacket(
     confidence,
     confidenceReason,
     retrievalFailed,
+    sections: packetSections.length > 0 ? packetSections : undefined,
   };
 }

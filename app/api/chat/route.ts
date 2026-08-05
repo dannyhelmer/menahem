@@ -66,7 +66,13 @@ import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
 import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
-import { filterUsedSources, findFabricatedCitations, hasOfficialCitation } from "@/lib/research/source-attribution";
+import {
+  enforceSectionCitationScope,
+  filterUsedSources,
+  findFabricatedCitations,
+  hasOfficialCitation,
+  scanAndReplaceCitations,
+} from "@/lib/research/source-attribution";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
 
 // Validated-generation queries (see requiresValidatedGeneration below) buffer
@@ -693,15 +699,27 @@ interface RouteOutcome {
   skipModel?: boolean;
   skipModelMessage?: string;
   maxTokens?: number;
-  // True for single-question research/comparison categories (not multi-part,
-  // not deep research -- see the two call sites that set this) where the
-  // generated response must be validated against retrieved official sources
-  // BEFORE anything is sent to the client, rather than streamed token-by-
-  // token. Generation is buffered server-side, checked for an actual
-  // citation to a government-tier source (see hasOfficialCitation), and
-  // rejected outright (not just caveated) if official sources were
-  // retrieved but the response doesn't cite any of them.
+  // True for research categories (single-question, comparison, AND NOW
+  // multi-part -- not deep research/web search) where generation is
+  // buffered server-side and validated before anything is sent to the
+  // client, rather than streamed token-by-token. What "validated" means
+  // differs by category -- see allowWholeResponseCitationRejection below.
   requiresValidatedGeneration?: boolean;
+  // True only for single-question and comparison: on a citation failure
+  // (no official source cited, or a fabricated one), the ENTIRE response is
+  // discarded and replaced with a rejection message -- appropriate there
+  // since there's only ever one section to reject. False for multi-part:
+  // rejecting the whole answer over one bad citation in one section would
+  // undo the graceful-degradation design (see planner.ts) that's the whole
+  // point of decomposing into independent sections in the first place --
+  // multi-part instead gets surgical per-citation correction (see
+  // scanAndReplaceCitations/enforceSectionCitationScope) while every OTHER
+  // section's real content is left untouched. Meaningless when
+  // requiresValidatedGeneration is false.
+  allowWholeResponseCitationRejection?: boolean;
+  // Per-section source scoping (multi-part only) -- see ResearchPacket's
+  // own `sections` field in lib/research/packet.ts for the full rationale.
+  sections?: { key: string; sources: TieredSource[] }[];
   // True when this message was routed through a retrieval-grounded path
   // (political research, comparison, deep research, web search). For these,
   // previous conversation turns are stripped from the model's input so stale
@@ -937,6 +955,7 @@ async function routeMessage(
         // planner has) -- validate the generated text actually cites the
         // official sources retrieved for it before sending anything.
         requiresValidatedGeneration: true,
+        allowWholeResponseCitationRejection: true,
         grounded: true,
         resolvedUserText: text,
         documentCitationCheck: documentContext?.citationCheck ?? null,
@@ -984,11 +1003,18 @@ async function routeMessage(
       // response the way a single-topic low-confidence answer would.
       skipModel: !isMultiPart && requiresLiveData(text) && packet.retrievalFailed,
       skipModelMessage: packet.retrievalFailureReason,
-      // Same reasoning as skipModel above -- the multi-part path already has
-      // its own deliberate per-section graceful-degradation instructions
-      // (see INSUFFICIENT_SECTION_PHRASE in planner.ts) and isn't subject to
-      // an all-or-nothing citation gate on top of that.
-      requiresValidatedGeneration: !isMultiPart,
+      // Both single-question and multi-part now buffer generation (nothing
+      // reaches the client until validated) -- "validation before the
+      // response is finalized" requires that either way. What differs is
+      // allowWholeResponseCitationRejection below: the multi-part path
+      // already has its own deliberate per-section graceful-degradation
+      // instructions (see INSUFFICIENT_SECTION_PHRASE in planner.ts) and
+      // must not be subject to an all-or-nothing citation gate on top of
+      // that -- one bad citation in one section gets corrected in place,
+      // not treated as grounds to discard every other section's real work.
+      requiresValidatedGeneration: true,
+      allowWholeResponseCitationRejection: !isMultiPart,
+      sections: isMultiPart ? packet.sections : undefined,
       grounded: true,
       resolvedUserText: text,
       documentCitationCheck: documentContext?.citationCheck ?? null,
@@ -1278,6 +1304,8 @@ export const POST = withAuth(async (request, _ctx, user) => {
           skipModelMessage,
           maxTokens,
           requiresValidatedGeneration,
+          allowWholeResponseCitationRejection,
+          sections,
           grounded,
           resolvedUserText,
           documentCitationCheck,
@@ -1531,7 +1559,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
           const fabricatedCitations = findFabricatedCitations(assistantText, allSources ?? []);
           if (fabricatedCitations.length > 0) {
             console.warn(`[citation-fabrication] fabricated citation(s) detected: ${fabricatedCitations.join(", ")}`);
-            if (requiresValidatedGeneration) {
+            if (requiresValidatedGeneration && allowWholeResponseCitationRejection) {
               // Nothing sent to the client yet -- replace outright, same
               // severity as the official-citation gate below. citationRejected
               // skips that gate entirely so it can't overwrite this message
@@ -1540,11 +1568,20 @@ export const POST = withAuth(async (request, _ctx, user) => {
               truncated = false;
               citationRejected = true;
               onStage("⚠ Response withheld -- cited a source that was never retrieved");
+            } else if (requiresValidatedGeneration) {
+              // Multi-part: buffered (nothing sent yet) but whole-response
+              // rejection isn't available here -- graceful degradation means
+              // every OTHER section's real content must survive. Now that
+              // nothing has been sent, this can be a precise, in-place
+              // correction instead of the append-a-notice fallback below.
+              const fabricatedSet = new Set(fabricatedCitations);
+              assistantText = scanAndReplaceCitations(assistantText, (url) => fabricatedSet.has(url)).text;
+              onStage(`⚠ Corrected ${fabricatedCitations.length} citation${fabricatedCitations.length === 1 ? "" : "s"} that could not be verified`);
             } else {
-              // Tokens may already be streamed (multi-part, deep research,
-              // plain web search) -- full replacement isn't available here;
-              // append a visible correction instead, same established
-              // pattern as the document-citation-verification notice above.
+              // Tokens may already be streamed (deep research, plain web
+              // search) -- full replacement isn't available here; append a
+              // visible correction instead, same established pattern as the
+              // document-citation-verification notice above.
               const notice =
                 "\n\nNote: this response cited the following URL(s) that could not be verified against " +
                 "retrieved sources -- treat them with caution, they may not be real or accurate:\n" +
@@ -1556,19 +1593,47 @@ export const POST = withAuth(async (request, _ctx, user) => {
           }
         }
 
-        // CITATION GATE (validated-generation path only): everything above
-        // this point has already run against assistantText, so this is the
-        // true final text -- the one and only frame sent to the client for
-        // this path is built from it. If official sources were retrieved but
-        // the generated answer doesn't actually cite one of them, replace it
+        // SECTION-SCOPE CHECK (multi-part only): a citation that IS
+        // genuinely in the retrieval set can still be wrong -- retrieved
+        // for a DIFFERENT section than the one citing it (confirmed in
+        // production: a Florida section citing a URL retrieved only for
+        // Virginia). findFabricatedCitations above can't catch this since
+        // the URL passes its whole-pool check; this is specifically the
+        // "retrieved, but for the wrong section" check, run separately
+        // since it needs the per-section source lists the fabrication
+        // check doesn't have. Runs before the response is ever sent, same
+        // as the check above.
+        if (sections && sections.length > 0) {
+          const { text: sectionCorrected, violations } = enforceSectionCitationScope(assistantText, sections);
+          if (violations.length > 0) {
+            console.warn(
+              `[citation-section-scope] cross-section citation(s) corrected: ` +
+                violations.map((v) => `${v.url} (cited under "${v.section}")`).join(", "),
+            );
+            onStage(
+              `⚠ Corrected ${violations.length} citation${violations.length === 1 ? "" : "s"} cited in the wrong section`,
+            );
+          }
+          assistantText = sectionCorrected;
+        }
+
+        // CITATION GATE (single-question/comparison only, via
+        // allowWholeResponseCitationRejection): everything above this point
+        // has already run against assistantText, so this is the true final
+        // text -- the one and only frame sent to the client for this path
+        // is built from it. If official sources were retrieved but the
+        // generated answer doesn't actually cite one of them, replace it
         // entirely rather than caveat it -- "official sources exist but this
         // response ignored them" is exactly the silent-fallback-to-unverified
-        // behavior the validated path exists to prevent. Skipped entirely
-        // when the fabrication check above already rejected the response --
-        // that rejection message legitimately won't cite any real official
+        // behavior the validated path exists to prevent. Never applies to
+        // multi-part (allowWholeResponseCitationRejection is false there) --
+        // that path's citation issues are corrected in place above, not
+        // grounds to discard the whole response. Also skipped when the
+        // fabrication check above already rejected the response -- that
+        // rejection message legitimately won't cite any real official
         // source either, and must not be overwritten by this gate's own,
         // different-wording rejection.
-        if (requiresValidatedGeneration && !citationRejected) {
+        if (requiresValidatedGeneration && allowWholeResponseCitationRejection && !citationRejected) {
           const officialSources = (allSources ?? []).filter(
             (s): s is TieredSource => "tier" in s && s.tier === "government",
           );

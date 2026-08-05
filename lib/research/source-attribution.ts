@@ -114,3 +114,112 @@ export function findFabricatedCitations(text: string, sources: { url: string }[]
   }
   return fabricated;
 }
+
+// The exact phrase used everywhere a citation/field can't be honestly
+// filled -- matches the phrase already required at the prompt level (see
+// packet.ts/planner.ts) so a mechanically-corrected citation reads exactly
+// like a model-written one, not like a different, second voice.
+const NOT_VERIFIED_PHRASE = "Not verified from retrieved official sources";
+
+// Matches EITHER a markdown link `[label](url)` (captures label in group 1,
+// url in group 2) OR a bare URL (captures in group 3) -- one shared pattern
+// so scanAndReplaceCitations only has to walk the text once. The markdown
+// form's URL segment stops at whitespace or `)` (a real URL practically
+// never contains either unencoded), so it doesn't need the same trailing-
+// punctuation stripping the bare form does.
+const CITATION_MATCH_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)\]}"'<>]+)/g;
+
+// Position-aware citation scanner/replacer -- the shared core both the
+// global-fabrication pass and the per-section scope pass (below) build on,
+// so URL-matching/markdown-link-vs-bare-URL logic exists in exactly one
+// place. `isInvalidAt(url, index)` decides per-citation whether it should
+// be replaced; `index` is the citation's character offset in `text`, which
+// is what lets a caller implement section-scoped validity (see
+// enforceSectionCitationScope) without this function needing to know
+// anything about sections itself. An invalid markdown link is replaced
+// whole (`[label](url)` -> the phrase, since a broken href with a
+// non-URL value would render as a dead link); an invalid bare URL is
+// replaced in place, leaving any trailing punctuation untouched.
+export function scanAndReplaceCitations(
+  text: string,
+  isInvalidAt: (url: string, index: number) => boolean,
+): { text: string; replaced: { url: string; index: number }[] } {
+  const replaced: { url: string; index: number }[] = [];
+  let result = "";
+  let lastEnd = 0;
+  let match: RegExpExecArray | null;
+  CITATION_MATCH_RE.lastIndex = 0;
+  while ((match = CITATION_MATCH_RE.exec(text)) !== null) {
+    const isMarkdownLink = match[2] !== undefined;
+    const rawUrl = (isMarkdownLink ? match[2] : match[3])!;
+    const url = isMarkdownLink ? rawUrl : rawUrl.replace(/[.,;:!?)\]}'"]+$/, "");
+    const matchStart = match.index;
+    const consumedEnd = isMarkdownLink ? matchStart + match[0].length : matchStart + url.length;
+
+    if (isInvalidAt(url, matchStart)) {
+      result += text.slice(lastEnd, matchStart) + NOT_VERIFIED_PHRASE;
+      replaced.push({ url, index: matchStart });
+      lastEnd = consumedEnd;
+    }
+  }
+  result += text.slice(lastEnd);
+  return { text: result, replaced };
+}
+
+export interface CitationSection {
+  key: string;
+  sources: { url: string }[];
+}
+
+// Fix (per-section source scoping): a citation is only valid within the
+// SAME section it was retrieved for, even when it's genuinely official and
+// even when it's cited somewhere else in the same response -- confirmed in
+// production: a Florida section cited a URL that was genuinely retrieved,
+// but for a Virginia section elsewhere in the same multi-part answer.
+// findFabricatedCitations alone can't catch this (the URL IS in the
+// combined retrieval set); this function is specifically the "retrieved,
+// but for the WRONG section" check. Locates each section's exact
+// "## <key>" heading, in the order they actually appear in `text` (not
+// assumed from `sections`' input order, since the model might reorder
+// them), and treats the span from one heading to the next as that
+// section's own scope. A section whose heading can't be found in the text
+// is skipped entirely (fail open, not closed) -- nothing before the first
+// recognized heading, or belonging to an unrecognized section, is second-
+// guessed here; that's the existing global fabrication check's job.
+export function enforceSectionCitationScope(
+  text: string,
+  sections: CitationSection[],
+): { text: string; violations: { section: string; url: string }[] } {
+  if (sections.length === 0) return { text, violations: [] };
+
+  const headingMatches: { key: string; contentStart: number }[] = [];
+  for (const section of sections) {
+    const escaped = section.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const headingRe = new RegExp(`^##\\s+${escaped}\\s*$`, "m");
+    const match = headingRe.exec(text);
+    if (match) headingMatches.push({ key: section.key, contentStart: match.index + match[0].length });
+  }
+  if (headingMatches.length === 0) return { text, violations: [] };
+  headingMatches.sort((a, b) => a.contentStart - b.contentStart);
+
+  const sourcesByKey = new Map(
+    sections.map((s) => [s.key, new Set(s.sources.map((src) => normalizeUrlForComparison(src.url)))]),
+  );
+
+  const violations: { section: string; url: string }[] = [];
+  const { text: correctedText } = scanAndReplaceCitations(text, (url, index) => {
+    let currentSection: { key: string; contentStart: number } | undefined;
+    for (const h of headingMatches) {
+      if (h.contentStart > index) break;
+      currentSection = h;
+    }
+    // Before the first recognized heading -- not this pass's concern.
+    if (!currentSection) return false;
+    const validSet = sourcesByKey.get(currentSection.key);
+    if (!validSet || validSet.has(normalizeUrlForComparison(url))) return false;
+    violations.push({ section: currentSection.key, url });
+    return true;
+  });
+
+  return { text: correctedText, violations };
+}

@@ -362,6 +362,17 @@ export interface ResearchPacket {
   // retrieval pipeline's failure-handling requirement. Undefined when
   // retrievalFailed is false.
   retrievalFailureReason?: string;
+  // Per-section source scoping (multi-part planner only -- see
+  // buildPlannedResearchPacket in planner.ts): one entry per decomposed
+  // task that resolved its own state, each with ONLY that task's own
+  // retrieved sources (not the merged `sources` pool above). Undefined for
+  // every other builder (plain single-question, comparison, deep research)
+  // -- there's no cross-section citation-reuse risk to guard against when
+  // there's only ever one section. Used by app/api/chat/route.ts's
+  // enforceSectionCitationScope to catch a source retrieved for one
+  // section (e.g. Florida) being cited in a different section's part of
+  // the answer (e.g. Virginia) before the response is ever sent.
+  sections?: { key: string; sources: TieredSource[] }[];
 }
 
 // Deterministic, mechanical explanation of a confidence rating -- source
