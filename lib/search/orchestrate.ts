@@ -89,7 +89,23 @@ export async function runSearchForMessage(
   maxResults = 5,
   options?: {
     preferRecent?: boolean;
+    // The Tavily-safe subset of official domains (real apex domains only,
+    // e.g. "ilga.gov") -- passed through to provider.search() as the
+    // structured include_domains param. Deliberately excludes bare-TLD
+    // entries like "gov"/"mil" (the DEFAULT_OFFICIAL_DOMAINS floor), since
+    // those aren't verified as valid Tavily include_domains patterns.
     includeDomains?: string[];
+    // The FULL requested official-domain list, bare TLDs included -- used
+    // for deciding whether a provider's results actually hit an official
+    // domain (a plain `.endsWith(".gov")`-style suffix match already
+    // handles both "ilga.gov" and the bare "gov" floor correctly, so this
+    // doesn't need the same Tavily-specific filtering includeDomains does).
+    // Kept separate from includeDomains rather than reusing it, precisely
+    // because the generic .gov/.mil floor case -- 48 of 50 states, with no
+    // specific route -- would otherwise never be recognized as "this was
+    // an official search" at all, silently disabling the provider-fallback
+    // chain for the single highest-risk case it exists to cover.
+    officialDomains?: string[];
     onProgress?: (update: SearchProgressUpdate) => void;
     diagnostics?: RetrievalDiagnostics;
     diagnosticsPhase?: string;
@@ -120,7 +136,7 @@ export async function runSearchForMessage(
   const failureNotes: string[] = [];
 
   const providerOptions = { preferRecent: options?.preferRecent, includeDomains: options?.includeDomains };
-  const requestedDomains = options?.includeDomains ?? [];
+  const requestedDomains = options?.officialDomains ?? [];
   for (const provider of providers) {
     try {
       const providerResults = await provider.search(query, maxResults, providerOptions);
@@ -209,7 +225,7 @@ export async function runSearchForMessage(
   // The audit's key diagnostic: did the requested official domains actually
   // come back from the search API at all, regardless of what our own
   // ranking/filtering does with them afterward.
-  recordOfficialDomainCheck(options?.diagnostics, diagPhase, options?.includeDomains ?? [], results);
+  recordOfficialDomainCheck(options?.diagnostics, diagPhase, options?.officialDomains ?? [], results);
 
   // Social-media posts are essentially never a citable source for a
   // government-research platform (no editorial process, easily spoofed,
@@ -456,6 +472,10 @@ export async function runSearchWithRetry(
     // existing, already-working behavior for that generic case, unchanged
     // here. A real apex domain always contains a dot; a bare TLD never does.
     includeDomains: options?.preferOfficial?.domains.filter((d) => d.includes(".")),
+    // The FULL list (bare TLD floor included) -- used for the provider-
+    // fallback "did this hit an official domain" check and diagnostics,
+    // which don't share includeDomains' Tavily-specific safety concern.
+    officialDomains: options?.preferOfficial?.domains,
     diagnosticsPhase: options?.preferOfficial ? "official (phase 1)" : "search",
   });
 
