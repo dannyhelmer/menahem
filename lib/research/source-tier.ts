@@ -89,6 +89,12 @@ const GOVERNOR_RE = /\bgovernor'?s?( office)?\b/i;
 // court opinions, ranked the same relative to government agencies.
 const STATE_COURTS_RE = /\bsupreme court\b|\bcourt of appeals\b|\bappellate court\b|\bstate court\w*\b/i;
 const STATE_AGENCY_RE = /\bdepartment of\b|\bstate agency\b|\bdivision of\b|\bstate commission\b/i;
+// Confirmed gap: an Attorney General page had no matching category at all,
+// so it fell to "unclassified" (rank 75) -- below state_agency (81) and
+// even state_courts (79). The requested hierarchy groups "state executive
+// agencies or attorneys general" as a single tier; checked alongside
+// STATE_AGENCY_RE below, same rank.
+const ATTORNEY_GENERAL_RE = /\battorney general\b/i;
 const COUNTY_GOV_RE = /\bcounty\b|\bparish of\b/i;
 const MUNICIPAL_GOV_RE =
   /\bcity of\b|\btown of\b|\bvillage of\b|\btownship of\b|\bborough of\b|\bcity council\b|\bcity government\b|\bmunicipal\w*\b/i;
@@ -104,7 +110,7 @@ function classifyGovSource(title: string): GovCategory {
   if (STATE_STATUTES_RE.test(title)) return "state_statutes";
   if (GOVERNOR_RE.test(title)) return "governor";
   if (STATE_COURTS_RE.test(title)) return "state_courts";
-  if (STATE_AGENCY_RE.test(title)) return "state_agency";
+  if (STATE_AGENCY_RE.test(title) || ATTORNEY_GENERAL_RE.test(title)) return "state_agency";
   if (COUNTY_GOV_RE.test(title)) return "county";
   if (MUNICIPAL_GOV_RE.test(title)) return "municipal";
   return "unclassified";

@@ -389,9 +389,20 @@ export interface ResearchPacket {
 // Extracted so the same rule can be re-applied post-generation against a
 // filtered (actually-used) source set, not just the raw retrieval set --
 // see filterUsedSources in source-attribution.ts.
+// Confirmed gap: this used to return "high" whenever at least one
+// government-tier source was PRESENT alongside 2+ total sources -- a
+// response citing 1 official source and 4 secondary ones scored identically
+// to one citing 4 official and 1 secondary. A response based mostly on
+// secondary sources must not receive a High rating, so official sources now
+// have to make up at least HALF of what's actually cited (governmentRatio),
+// not merely appear at all. directGovHit (a structured gov-data-provider
+// hit, e.g. Congress.gov's own API) stays sufficient on its own -- it's
+// unambiguously primary by construction, no ratio needed.
 export function computeConfidence(sources: TieredSource[], directGovHit: boolean): ResearchPacket["confidence"] {
   const governmentSourceCount = sources.filter((s) => s.tier === "government").length;
-  if (directGovHit || (governmentSourceCount >= 1 && sources.length >= 2)) return "high";
+  const governmentRatio = sources.length > 0 ? governmentSourceCount / sources.length : 0;
+  if (directGovHit) return "high";
+  if (governmentSourceCount >= 1 && governmentRatio >= 0.5 && sources.length >= 2) return "high";
   if (sources.length >= 1) return "medium";
   return "low";
 }

@@ -72,6 +72,7 @@ import {
   filterUsedSources,
   findFabricatedCitations,
   hasOfficialCitation,
+  hasUnusedOfficialSource,
   scanAndReplaceCitations,
   stripPlaceholderLinks,
 } from "@/lib/research/source-attribution";
@@ -1762,6 +1763,20 @@ export const POST = withAuth(async (request, _ctx, user) => {
           const directGovHit = usedTiered.some((s) => s.provenance === "always_keep" && s.tier === "government");
           finalConfidence = computeConfidence(usedTiered, directGovHit);
           finalConfidenceReason = buildConfidenceReason(finalConfidence, usedTiered, directGovHit);
+
+          // Paths with allowWholeResponseCitationRejection already replace
+          // the ENTIRE response when an official source went uncited (see
+          // the citation gate above) -- that rejection message itself names
+          // the retrieved official URLs, so usedSources already counts them
+          // as referenced and this never double-fires there. Multi-part and
+          // deep research have no equivalent gate, so this is the only
+          // signal connecting "an official source existed" to "but this
+          // response didn't draw on it" for those paths.
+          if (hasUnusedOfficialSource((allSources ?? []) as TieredSource[], usedTiered)) {
+            finalConfidenceReason +=
+              "\n⚠ An official government source was retrieved for this topic but not cited in this response -- " +
+              "treat this answer as unverified against the primary legal record.";
+          }
         }
 
         if (usedSources.length > 0) writeFrame({ type: "sources", sources: usedSources });

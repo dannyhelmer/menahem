@@ -70,6 +70,21 @@ export function hasOfficialCitation<T extends { title: string; url: string; tier
   return sources.some((s) => s.tier === "government" && isSourceReferenced(text, s));
 }
 
+// A different question than hasOfficialCitation: not "did the text cite an
+// official source" but "was an official source retrieved AT ALL, and did
+// NONE of them make it into what was actually cited." Used to surface a
+// caveat on paths that don't have hasOfficialCitation's whole-response
+// rejection gate (multi-part, deep research) -- those have no other signal
+// today connecting "official source existed" to "but this response didn't
+// use it." Confirmed live: an Illinois BIPA query retrieved the actual
+// ILCS statute page, ranked it #1, but the model cited only secondary
+// sources -- on a single-question path this trips hasOfficialCitation's
+// full rejection; on a multi-part/deep-research path nothing flagged it at
+// all before this.
+export function hasUnusedOfficialSource<T extends { tier: string }>(allSources: T[], usedSources: T[]): boolean {
+  return allSources.some((s) => s.tier === "government") && !usedSources.some((s) => s.tier === "government");
+}
+
 // Normalizes a URL for comparison purposes only (never for display) --
 // lowercases the host, strips a leading "www." and a single trailing slash.
 // Deliberately leaves path/query untouched: over-normalizing (e.g. ignoring

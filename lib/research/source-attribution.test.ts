@@ -3,6 +3,7 @@ import {
   enforceSectionCitationScope,
   findFabricatedCitations,
   hasOfficialCitation,
+  hasUnusedOfficialSource,
   isSourceReferenced,
   scanAndReplaceCitations,
   stripPlaceholderLinks,
@@ -97,6 +98,30 @@ describe("stripPlaceholderLinks", () => {
   it("leaves text with no links at all unchanged", () => {
     const text = "Not verified from retrieved official sources.";
     expect(stripPlaceholderLinks(text)).toEqual({ text, count: 0 });
+  });
+});
+
+describe("hasUnusedOfficialSource", () => {
+  it("is true when the pool has an official source but none made it into the used set -- the confirmed BIPA case", () => {
+    const allSources = [{ tier: "government" }, { tier: "general" }];
+    const usedSources = [{ tier: "general" }];
+    expect(hasUnusedOfficialSource(allSources, usedSources)).toBe(true);
+  });
+
+  it("is false when an official source IS among the used set", () => {
+    const allSources = [{ tier: "government" }, { tier: "general" }];
+    const usedSources = [{ tier: "government" }];
+    expect(hasUnusedOfficialSource(allSources, usedSources)).toBe(false);
+  });
+
+  it("is false when the pool never had an official source at all", () => {
+    const allSources = [{ tier: "general" }, { tier: "news" }];
+    const usedSources = [{ tier: "general" }];
+    expect(hasUnusedOfficialSource(allSources, usedSources)).toBe(false);
+  });
+
+  it("is false when nothing was retrieved at all", () => {
+    expect(hasUnusedOfficialSource([], [])).toBe(false);
   });
 });
 

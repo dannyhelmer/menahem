@@ -62,6 +62,14 @@ describe("stateForDomain", () => {
     expect(stateForDomain("ilga.gov")).toBe("Illinois");
   });
 
+  it("resolves a subdomain of a known state domain -- the confirmed production bug", () => {
+    // code.wvlegislature.gov surfaced for a Virginia query and was accepted
+    // as generic government-tier evidence because the old exact-match-only
+    // lookup returned null for it, so the cross-state rejection never fired.
+    expect(stateForDomain("code.wvlegislature.gov")).toBe("West Virginia");
+    expect(stateForDomain("bills.ilga.gov")).toBe("Illinois");
+  });
+
   it("never flags an unmapped or generic domain", () => {
     expect(stateForDomain("congress.gov")).toBeNull();
     expect(stateForDomain("gov")).toBeNull();

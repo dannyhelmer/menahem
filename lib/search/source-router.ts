@@ -370,6 +370,19 @@ for (const [state, domains] of Object.entries(STATE_OFFICIAL_DOMAINS)) {
   for (const domain of all) DOMAIN_TO_STATE.set(domain, state);
 }
 
+// Confirmed gap: code.wvlegislature.gov (West Virginia's own code site, a
+// subdomain of the table's wvlegislature.gov entry) surfaced for a Virginia
+// query and was accepted as generic government-tier evidence -- the exact
+// cross-state contamination this function exists to reject, but an exact-
+// string Map lookup never matches a subdomain of a known domain. A
+// subdomain of a verified state domain belongs to the same state (this
+// table only contains independently-verified official domains, so the
+// false-positive risk of this assumption is negligible).
 export function stateForDomain(host: string): string | null {
-  return DOMAIN_TO_STATE.get(host) ?? null;
+  const direct = DOMAIN_TO_STATE.get(host);
+  if (direct) return direct;
+  for (const [domain, state] of DOMAIN_TO_STATE) {
+    if (host.endsWith(`.${domain}`)) return state;
+  }
+  return null;
 }
