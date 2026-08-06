@@ -16,6 +16,7 @@ import {
   JURISDICTION_CLARIFICATION_MESSAGE,
   LOCAL_JURISDICTION_CLARIFICATION_MESSAGE,
   resolveJurisdictionAndState,
+  type Jurisdiction,
 } from "@/lib/intelligence/jurisdiction";
 import { runMathForMessage } from "@/lib/intelligence/math-tool";
 import { extractComparisonTargets } from "@/lib/intelligence/comparison-targets";
@@ -1020,10 +1021,23 @@ async function routeMessage(
     // all, e.g. the state-privacy-laws example above).
     const hasConfidentEntities = plan.entities.length >= 2;
     const isMultiPart = hasConfidentEntities || detectMultiPartResearchQuestion(text);
+    // The planner already determined each entity's jurisdiction (e.g.
+    // California Consumer Privacy Act -> California) -- that becomes
+    // authoritative here directly, not re-derived from the constructed task
+    // text below. resolveJurisdictionAndState's regex inference needs a
+    // branch-noun keyword or a whole-question intent that a generated
+    // "...in California..." sentence doesn't reliably produce (see
+    // PlannedTask's doc comment) -- passing the already-known jurisdiction
+    // straight through is what actually fixes that, not a better sentence
+    // template. entity.jurisdiction is a state name when known; when it
+    // isn't (a federal entity, or one the planner couldn't place), that
+    // means federal jurisdiction with no state to route on.
     const precomputedTasks = hasConfidentEntities
       ? plan.entities.map((e) => ({
           task: `${text} Focus specifically on ${e.name}${e.jurisdiction ? ` in ${e.jurisdiction}` : ""}, and answer only for this specific entity.`,
           sectionKey: e.name,
+          jurisdiction: (e.jurisdiction ? "state" : "federal") as Jurisdiction,
+          state: e.jurisdiction,
         }))
       : undefined;
     const packet = isMultiPart

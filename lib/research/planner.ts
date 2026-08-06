@@ -106,17 +106,29 @@ function computeOverallConfidence(sectionConfidences: ResearchPacket["confidence
   return "low";
 }
 
-// A task paired with the exact key its citations must be scoped to. Used
-// when the caller (see lib/research/research-plan.ts's planResearch) has
-// already identified the specific real-world entities this question needs
-// -- e.g. named laws in a multi-state comparison -- so buildPlannedResearchPacket
-// doesn't need to re-decompose the question itself, and doesn't need to
-// infer the section key from a detected US state (which only works when the
-// entity happens to BE a state; a court-case or federal-bill comparison has
-// no state to key off at all).
+// A task paired with the exact key its citations must be scoped to, AND its
+// jurisdiction/state -- both already known from the caller (see
+// lib/research/research-plan.ts's planResearch), which has already
+// identified the specific real-world entities this question needs and
+// where each one is FROM. buildPlannedResearchPacket must not re-decompose
+// the question, and must not re-INFER jurisdiction from the generated task
+// text either -- confirmed bug: resolveJurisdictionAndState's regex-based
+// inference requires either a branch-noun keyword (legislature, attorney
+// general, governor, court, HB/SB number) in the task text or a
+// state_legislation/federal_legislation intent on the OUTER question,
+// neither of which a constructed task like "...California Consumer
+// Privacy Act (CCPA) in California..." reliably produces -- so every
+// entity-derived task silently fell back to jurisdiction=federal,
+// state=null, and search fell back to the generic site:gov OR site:mil
+// floor instead of California's own domains, for all five states in a
+// five-state comparison, every time. The planner already knows the
+// answer; making the resolver re-derive it from prose it doesn't control
+// is throwing away information that was already correct.
 export interface PlannedTask {
   task: string;
   sectionKey: string;
+  jurisdiction: Jurisdiction;
+  state: string | null;
 }
 
 export async function buildPlannedResearchPacket(
@@ -156,7 +168,14 @@ export async function buildPlannedResearchPacket(
   // Resolved once and reused below (both for the search call and for the
   // section heading each task must use) -- see the sectionKey handling in
   // the forEach below for why this needs to survive past the search call.
-  const taskResolutions = tasks.map((task) => resolveJurisdictionAndState(task, intents));
+  // Precomputed tasks carry their own already-correct jurisdiction/state
+  // straight from the planner -- authoritative, never re-inferred from the
+  // generated task text (see PlannedTask's doc comment for why that
+  // inference is unreliable). Only the freeform LLM-decomposition path
+  // (no precomputedTasks) still needs resolveJurisdictionAndState at all.
+  const taskResolutions = precomputedTasks
+    ? precomputedTasks.map((t) => ({ jurisdiction: t.jurisdiction, state: t.state }))
+    : tasks.map((task) => resolveJurisdictionAndState(task, intents));
   const settled = await Promise.allSettled(
     tasks.map((task, i) => {
       const { jurisdiction: taskJurisdiction, state: taskState } = taskResolutions[i];
