@@ -97,24 +97,87 @@ const TERM_STOPWORDS = new Set([
   "section", "code", "statute", "statutes",
 ]);
 
-function computeSignificantTerms(text: string): string[] {
+// Structural boilerplate from THIS module's own task-text template (see
+// PlannedTask construction in app/api/chat/route.ts: "...Focus specifically
+// on <entity> in <state>, and answer only for this specific entity.") --
+// excluded for the same reason TERM_STOPWORDS is: left in, it's a "free"
+// match every candidate from the right domain gets regardless of topic,
+// which is half of the confirmed contamination (the other half is the
+// state name itself, excluded dynamically below since it's not static
+// text). If this template's wording changes, revisit this list.
+const TASK_TEMPLATE_NOISE_WORDS = new Set(["entity", "specifically", "focus"]);
+
+// Confirmed production bug: a Nevada campaign-finance PDF and several
+// Massachusetts real-estate/tax/bar-exam pages passed the old relevance
+// check ONLY because their title said "Nevada"/"Massachusetts" (the
+// state's own name, present in virtually every page on that state's own
+// domain) or the boilerplate word "entity" -- neither has anything to do
+// with the actual topic being searched for. excludeStateName removes the
+// state's own words (handles multi-word names like "West Virginia") from
+// the significant-terms set entirely, so a domain match can no longer
+// substitute for a topical one.
+export function computeSignificantTerms(text: string, excludeStateName?: string | null): string[] {
   const seen = new Set<string>();
+  const stateWords = excludeStateName
+    ? new Set(excludeStateName.toLowerCase().split(/\s+/))
+    : new Set<string>();
   for (const raw of text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)) {
-    if (raw.length >= 4 && !TERM_STOPWORDS.has(raw)) seen.add(raw);
+    if (raw.length >= 4 && !TERM_STOPWORDS.has(raw) && !TASK_TEMPLATE_NOISE_WORDS.has(raw) && !stateWords.has(raw)) {
+      seen.add(raw);
+    }
   }
   return Array.from(seen);
 }
 
-// Fail open, not closed: if nothing survived stopword-filtering (a very
-// short or generic task question), there's nothing meaningful to check
-// overlap against -- treat as relevant rather than rejecting everything.
-// Requires only ONE overlapping term, never a percentage/majority -- a
-// stricter threshold risks killing legitimate results over a single
-// differently-phrased synonym.
-function isTopicallyRelevant(terms: string[], text: string): boolean {
-  if (terms.length === 0) return true;
-  const lower = text.toLowerCase();
-  return terms.some((t) => lower.includes(t));
+// Fix (ranking): relevance used to be a binary gate (>=1 overlapping term)
+// with zero influence on ORDER -- once past it, candidates sorted purely by
+// sourceAuthorityRank, so an unrelated official page could outrank or sit
+// alongside a genuinely relevant one just for being hosted at a
+// higher-authority-classified domain. This computes a continuous score
+// instead: matchRatio (what fraction of the topic's significant terms
+// actually appear, not just whether any single one does) plus a title-
+// match bonus (a term in the TITLE is much stronger evidence of genuine
+// topical focus than one incidental mention in a page's body text). Fails
+// open the same way the old binary check did: no significant terms at all
+// (a very short/generic task) means nothing to discriminate on, so treat
+// as maximally relevant rather than rejecting everything.
+export interface RelevanceScore {
+  matchedTerms: string[];
+  ratio: number;
+  titleMatch: boolean;
+}
+
+export function scoreRelevance(terms: string[], title: string, bodyText: string): RelevanceScore {
+  if (terms.length === 0) return { matchedTerms: [], ratio: 1, titleMatch: false };
+  const lowerTitle = title.toLowerCase();
+  const lowerBody = bodyText.toLowerCase();
+  const matchedTerms = terms.filter((t) => lowerTitle.includes(t) || lowerBody.includes(t));
+  const titleMatch = terms.some((t) => lowerTitle.includes(t));
+  return { matchedTerms, ratio: matchedTerms.length / terms.length, titleMatch };
+}
+
+// The combined ranking score: relevance first, authority only as a
+// tiebreaker. The x1000 multiplier isn't a tuned magic number -- it's
+// large enough that ANY nonzero difference in relevanceScore (0-120 range:
+// a 0-100 ratio plus a 0-20 title bonus) mathematically outranks the
+// ENTIRE authority range (0-100), so authority can only ever decide
+// between candidates that are EQUALLY relevant, never override a real
+// relevance gap. "Combines" the two signals into one score, as requested,
+// without leaving the outcome dependent on hand-tuned weight balancing.
+const RELEVANCE_SORT_MULTIPLIER = 1000;
+
+export function rankingScore(relevance: RelevanceScore, authorityRank: number): number {
+  const relevanceScore = relevance.ratio * 100 + (relevance.titleMatch ? 20 : 0);
+  return relevanceScore * RELEVANCE_SORT_MULTIPLIER + authorityRank;
+}
+
+// The entry gate: at least one REAL topical term must match (after state-
+// name/boilerplate exclusion) -- same conceptual bar the old binary check
+// used, just computed from the now-cleaned term set. This is what makes
+// the confirmed contamination cases (matched ONLY on the state name or
+// "entity") get rejected outright now, not merely ranked lower.
+export function passesRelevanceGate(terms: string[], relevance: RelevanceScore): boolean {
+  return terms.length === 0 || relevance.matchedTerms.length > 0;
 }
 
 function hostnameOf(url: string): string | null {
@@ -314,27 +377,39 @@ export async function runSearchForMessage(
   // rejects congress.gov or an unmapped state's page.
   //
   // Fix 3 (topical relevance, snippet pass): reject a result with zero
-  // overlap between the task's significant terms and its title+snippet --
-  // this is what catches "congress.gov/most-viewed-bills" and dictionary-
-  // definition pages before they ever burn a fetch slot. Checked again
-  // post-fetch against the full text below, since a short snippet can
-  // mislead in either direction.
+  // REAL overlap between the task's significant terms and its
+  // title+snippet -- this is what catches "congress.gov/most-viewed-bills"
+  // and dictionary-definition pages before they ever burn a fetch slot.
+  // Checked again post-fetch against the full text below, since a short
+  // snippet can mislead in either direction.
+  //
+  // Fix (ranking): relevance is no longer a pass/fail gate whose survivors
+  // then get sorted by authority alone -- it's scored continuously
+  // (scoreRelevance) and drives the sort itself (rankingScore), with
+  // authority only breaking ties between equally-relevant candidates. The
+  // state's own name is excluded from significantTerms so an on-domain
+  // page can no longer pass purely by mentioning the state it's hosted in.
   const taskState = options?.taskContext?.state ?? null;
   const significantTerms = options?.taskContext?.taskQuestion
-    ? computeSignificantTerms(options.taskContext.taskQuestion)
+    ? computeSignificantTerms(options.taskContext.taskQuestion, taskState)
     : [];
-  const filtered = results.filter((r) => {
+  const scored = results.map((r) => ({
+    result: r,
+    relevance: scoreRelevance(significantTerms, r.title, r.snippet),
+  }));
+  const filtered = scored.filter(({ result: r, relevance }) => {
     if (isSocialMediaUrl(r.url)) return false;
     const host = hostnameOf(r.url);
     if (taskState && host) {
       const domainState = stateForDomain(host);
       if (domainState && domainState !== taskState) return false;
     }
-    if (!isTopicallyRelevant(significantTerms, `${r.title} ${r.snippet}`)) return false;
+    if (!passesRelevanceGate(significantTerms, relevance)) return false;
     return true;
   });
+  const filteredResults = new Set(filtered.map((f) => f.result));
   for (const r of results) {
-    if (filtered.includes(r)) continue;
+    if (filteredResults.has(r)) continue;
     const host = hostnameOf(r.url);
     const domainState = host ? stateForDomain(host) : null;
     const reason = isSocialMediaUrl(r.url)
@@ -345,17 +420,28 @@ export async function runSearchForMessage(
     recordFiltered(options?.diagnostics, diagPhase, r.url, r.title, reason);
   }
 
-  // Sort by source authority before deciding which pages are actually worth
-  // fetching -- otherwise an official/authoritative source that happened to
-  // rank lower in raw provider relevance never gets a chance at all once
-  // the list is sliced down to MAX_PAGES_TO_FETCH.
-  const ranked = filtered.sort((a, b) => sourceAuthorityRank(b.url, b.title) - sourceAuthorityRank(a.url, a.title));
-  const candidates = ranked.slice(0, MAX_PAGES_TO_FETCH);
-  for (const r of ranked.slice(MAX_PAGES_TO_FETCH)) {
-    recordFiltered(options?.diagnostics, diagPhase, r.url, r.title, "beyond_fetch_limit");
+  // Sort by the combined relevance+authority score before deciding which
+  // pages are actually worth fetching -- otherwise a genuinely relevant
+  // source that happened to rank lower in raw provider order never gets a
+  // chance at all once the list is sliced down to MAX_PAGES_TO_FETCH.
+  const ranked = filtered.sort(
+    (a, b) =>
+      rankingScore(b.relevance, sourceAuthorityRank(b.result.url, b.result.title)) -
+      rankingScore(a.relevance, sourceAuthorityRank(a.result.url, a.result.title)),
+  );
+  const candidates = ranked.slice(0, MAX_PAGES_TO_FETCH).map((s) => s.result);
+  for (const s of ranked.slice(MAX_PAGES_TO_FETCH)) {
+    recordFiltered(options?.diagnostics, diagPhase, s.result.url, s.result.title, "beyond_fetch_limit");
   }
-  for (const c of candidates) {
-    recordCandidate(options?.diagnostics, diagPhase, c.url, c.title, sourceAuthorityRank(c.url, c.title));
+  for (const s of ranked.slice(0, MAX_PAGES_TO_FETCH)) {
+    recordCandidate(
+      options?.diagnostics,
+      diagPhase,
+      s.result.url,
+      s.result.title,
+      sourceAuthorityRank(s.result.url, s.result.title),
+      s.relevance,
+    );
   }
 
   onProgress({ label: "Searching trusted government and news sources..." });
@@ -404,7 +490,7 @@ export async function runSearchForMessage(
   const billNumber = options?.taskContext?.billNumber ?? null;
   const rejectedUrls = new Set<string>();
   const fetched = rawFetched.filter((f) => {
-    if (!isTopicallyRelevant(significantTerms, `${f.title} ${f.text}`)) {
+    if (!passesRelevanceGate(significantTerms, scoreRelevance(significantTerms, f.title, f.text))) {
       recordFiltered(options?.diagnostics, diagPhase, f.url, f.title, "not_topically_relevant_fetched");
       rejectedUrls.add(f.url);
       return false;

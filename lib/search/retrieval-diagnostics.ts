@@ -35,10 +35,19 @@ export interface RetrievalDiagnostics {
   // social-media exclusion, or ranked below MAX_PAGES_TO_FETCH.
   filteredOut: { phase: string; url: string; title: string; reason: string }[];
   // (4) The ranked candidate list actually chosen for fetching, in rank
-  // order with each one's authority score -- "why was X selected" is
-  // answered directly by its rank relative to everything else that phase
-  // actually returned.
-  candidates: { phase: string; url: string; title: string; authorityRank: number; fetchStatus: "success" | "failed" | "pending" }[];
+  // order with each one's relevance AND authority score -- "why was X
+  // selected over Y" is answered directly by comparing both numbers, not
+  // just authority (relevance is the primary sort key; see rankingScore in
+  // orchestrate.ts).
+  candidates: {
+    phase: string;
+    url: string;
+    title: string;
+    authorityRank: number;
+    relevanceRatio: number;
+    titleMatch: boolean;
+    fetchStatus: "success" | "failed" | "pending";
+  }[];
   // (5) The key diagnostic for "why weren't official domains chosen, if
   // they exist": for any phase that specifically requested official
   // domains, which of those requested domains never appeared ANYWHERE in
@@ -153,8 +162,17 @@ export function recordCandidate(
   url: string,
   title: string,
   authorityRank: number,
+  relevance: { ratio: number; titleMatch: boolean },
 ): void {
-  diag?.candidates.push({ phase, url, title, authorityRank, fetchStatus: "pending" });
+  diag?.candidates.push({
+    phase,
+    url,
+    title,
+    authorityRank,
+    relevanceRatio: relevance.ratio,
+    titleMatch: relevance.titleMatch,
+    fetchStatus: "pending",
+  });
 }
 
 function markCandidateStatus(diag: RetrievalDiagnostics | undefined, url: string, status: "success" | "failed"): void {
