@@ -69,6 +69,7 @@ import { buildConfidenceReason, buildResearchPacket, computeConfidence, type Tie
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
 import { enforceCaliforniaDataBrokerAttribution } from "@/lib/research/entity-attribution";
 import { planResearch } from "@/lib/research/research-plan";
+import { flagStaleFutureFraming } from "@/lib/research/temporal-framing";
 import { enforceAttributedClaims } from "@/lib/research/unsupported-claims";
 import {
   enforcePrimarySourceCitation,
@@ -1829,6 +1830,29 @@ export const POST = withAuth(async (request, _ctx, user) => {
             onStage(`⚠ Attached ${primarySourceCorrections.length} missing official citation${primarySourceCorrections.length === 1 ? "" : "s"}`);
           }
           assistantText = primarySourceCorrected;
+        }
+
+        // TEMPORAL FRAMING CHECK: confirmed live -- a response describing
+        // a law's implementation deadline used future-projection language
+        // ("must begin processing requests by [date]") for a date that had
+        // already passed by the time the response was generated. The
+        // model is given the real current date every request and is now
+        // instructed to compare a retrieved milestone date against it
+        // before choosing tense, but reproducing a retrieved source's own
+        // (now-stale) future-tense wording verbatim is the same class of
+        // prompt-compliance gap every other mechanical check here exists
+        // for. See lib/research/temporal-framing.ts. Flags rather than
+        // asserts a new fact -- it never claims a deadline was actually
+        // met, only that the stated date is no longer in the future.
+        if (grounded) {
+          const { text: temporalCorrected, corrections: temporalCorrections } = flagStaleFutureFraming(assistantText);
+          if (temporalCorrections.length > 0) {
+            console.warn(
+              `[temporal-framing] stale future-tense date flagged: ` + temporalCorrections.map((c) => c.date).join(", "),
+            );
+            onStage(`⚠ Flagged ${temporalCorrections.length} stale date reference${temporalCorrections.length === 1 ? "" : "s"}`);
+          }
+          assistantText = temporalCorrected;
         }
 
         // CITATION GATE (single-question/comparison only, via
