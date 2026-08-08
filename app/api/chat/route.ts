@@ -67,6 +67,7 @@ import { buildFollowupSuggestions } from "@/lib/research/followups";
 import { enforceLegislativeStatusLanguage } from "@/lib/research/legislative-status";
 import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
+import { enforceCaliforniaDataBrokerAttribution } from "@/lib/research/entity-attribution";
 import { planResearch } from "@/lib/research/research-plan";
 import { enforceAttributedClaims } from "@/lib/research/unsupported-claims";
 import {
@@ -1773,6 +1774,31 @@ export const POST = withAuth(async (request, _ctx, user) => {
             onStage(`⚠ Flagged ${claimCorrections.length} unattributed claim${claimCorrections.length === 1 ? "" : "s"}`);
           }
           assistantText = claimsCorrected;
+        }
+
+        // ENTITY/PROVISION ATTRIBUTION CHECK: confirmed live -- a "data
+        // broker laws" comparison wrote up California under a "##
+        // California Consumer Privacy Act (CCPA)" heading, then attributed
+        // annual data-broker registration and the centralized DROP
+        // deletion platform directly to the CCPA. Those are provisions of
+        // California's separate, dedicated data-broker regime (the Data
+        // Broker Registration Law, as amended by the Delete Act, SB 362),
+        // not the CCPA/CPRA itself. research-plan.ts's
+        // correctKnownEntitySubstitutions fixes this at entity-selection
+        // time; this is the content-level backstop for whatever reaches
+        // generation by a path with no entity plan at all. See
+        // lib/research/entity-attribution.ts.
+        if (grounded) {
+          const { text: attributionCorrected, corrections: attributionCorrections } =
+            enforceCaliforniaDataBrokerAttribution(assistantText);
+          if (attributionCorrections.length > 0) {
+            console.warn(
+              `[entity-attribution] correction applied: ` +
+                attributionCorrections.map((c) => `"${c.section}" ${c.kind} (${c.count})`).join(", "),
+            );
+            onStage(`⚠ Corrected ${attributionCorrections.length} entity/provision attribution issue${attributionCorrections.length === 1 ? "" : "s"}`);
+          }
+          assistantText = attributionCorrected;
         }
 
         // CITATION GATE (single-question/comparison only, via

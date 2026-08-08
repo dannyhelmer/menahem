@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { parseResearchPlan, verifyLowConfidenceEntities, type ResearchPlanEntity } from "./research-plan";
+import {
+  correctKnownEntitySubstitutions,
+  parseResearchPlan,
+  verifyLowConfidenceEntities,
+  type ResearchPlan,
+  type ResearchPlanEntity,
+} from "./research-plan";
 
 const fallback = { jurisdiction: "federal" as const, state: null };
 
@@ -121,6 +127,58 @@ describe("parseResearchPlan", () => {
     const raw = "TOPIC: X\nJURISDICTION: state\nENTITY_TYPE: statute\nREQUEST_TYPE: comparison\nREASONING: n/a\nENTITIES:\n- | California\n- Real Entity | Texas | 70\n";
     const plan = parseResearchPlan(raw, "some question", fallback);
     expect(plan.entities).toEqual([{ name: "Real Entity", jurisdiction: "Texas", confidence: 70 }]);
+  });
+});
+
+describe("correctKnownEntitySubstitutions -- the confirmed CCPA-for-Delete-Act substitution", () => {
+  function plan(topic: string, entities: ResearchPlanEntity[]): ResearchPlan {
+    return { topic, jurisdiction: "state", entityType: "statute", requestType: "comparison", reasoning: "n/a", entities };
+  }
+
+  it("replaces California's CCPA/CPRA with the Delete Act entity for a data-broker-topic plan", () => {
+    const input = plan("Comparison of enacted state data broker laws", [
+      { name: "California Consumer Privacy Act (CCPA)", jurisdiction: "California", confidence: 90 },
+      { name: "Vermont Data Broker Law", jurisdiction: "Vermont", confidence: 85 },
+    ]);
+    const result = correctKnownEntitySubstitutions(input);
+    expect(result.entities[0].name).toBe(
+      "California Delete Act (SB 362) / Data Broker Registration Law (Cal. Civ. Code § 1798.99.80 et seq.)",
+    );
+    expect(result.entities[0].confidence).toBe(100);
+    // The already-correct entity is untouched.
+    expect(result.entities[1]).toEqual({ name: "Vermont Data Broker Law", jurisdiction: "Vermont", confidence: 85 });
+  });
+
+  it("also catches CPRA/California Privacy Rights Act naming, not just the CCPA abbreviation", () => {
+    const input = plan("data broker regulation comparison", [
+      { name: "California Privacy Rights Act (CPRA)", jurisdiction: "California", confidence: 88 },
+    ]);
+    const result = correctKnownEntitySubstitutions(input);
+    expect(result.entities[0].name).toContain("Delete Act (SB 362)");
+  });
+
+  it("leaves the entity untouched when it already names the Delete Act or its own statutory scope", () => {
+    const alreadyCorrect = plan("data broker laws", [
+      { name: "California Delete Act (SB 362)", jurisdiction: "California", confidence: 90 },
+    ]);
+    expect(correctKnownEntitySubstitutions(alreadyCorrect)).toEqual(alreadyCorrect);
+  });
+
+  it("does not touch a California CCPA entity when the topic is not data-broker-specific", () => {
+    const generalPrivacy = plan("state consumer privacy law comparison", [
+      { name: "California Consumer Privacy Act (CCPA)", jurisdiction: "California", confidence: 90 },
+    ]);
+    expect(correctKnownEntitySubstitutions(generalPrivacy)).toEqual(generalPrivacy);
+  });
+
+  it("does not touch a CCPA-named entity from a different jurisdiction", () => {
+    const otherState = plan("data broker laws", [{ name: "Some Other CCPA-named law", jurisdiction: "Texas", confidence: 80 }]);
+    expect(correctKnownEntitySubstitutions(otherState)).toEqual(otherState);
+  });
+
+  it("returns the plan unchanged when there are no entities at all", () => {
+    const empty = plan("data broker laws", []);
+    expect(correctKnownEntitySubstitutions(empty)).toEqual(empty);
   });
 });
 

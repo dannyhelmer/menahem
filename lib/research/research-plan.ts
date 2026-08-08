@@ -180,6 +180,55 @@ export function parseResearchPlan(raw: string, question: string, fallback: PlanF
   return { topic, jurisdiction, entityType, requestType, reasoning, entities };
 }
 
+// Confirmed live, twice, despite the precision-first prompt instruction
+// above: for a "data broker" specific request, the model repeatedly names
+// California's CCPA/CPRA (AB 375/2018, amended by the CPRA/Prop 24/2020,
+// Cal. Civ. Code SS1798.100 et seq.) -- a BROADER general consumer-privacy
+// law that does not itself contain data-broker registration or deletion-
+// platform provisions -- instead of California's actual dedicated data-
+// broker regime: the Data Broker Registration Law (AB 1202/2019), as
+// amended by the Delete Act (SB 362/2023) to add centralized DROP deletion
+// and CPPA oversight, Cal. Civ. Code SS1798.99.80 et seq. The model
+// consistently reports HIGH confidence in this substitution (CCPA is
+// extremely prominent in training data), so the confidence-gated
+// verification search above doesn't catch it -- it's a targeted check for
+// the model's OWN flagged uncertainty, not a defense against confident
+// wrongness. This is a deterministic override for this specific,
+// now-repeatedly-confirmed substitution, not a general pattern -- narrowly
+// scoped to California + a data-broker-specific topic, so it can't affect
+// any other jurisdiction or subject.
+const DATA_BROKER_TOPIC_RE = /\bdata broker/i;
+const CCPA_ENTITY_RE = /\b(?:CCPA|California Consumer Privacy Act|CPRA|California Privacy Rights Act)\b/i;
+const CALIFORNIA_DATA_BROKER_OWN_SCOPE_RE = /\bDelete Act\b|\bSB\s?362\b|\bAB\s?1202\b|\bdata broker regist/i;
+const CALIFORNIA_DATA_BROKER_ENTITY_NAME =
+  "California Delete Act (SB 362) / Data Broker Registration Law (Cal. Civ. Code § 1798.99.80 et seq.)";
+
+// Runs after parsing, before verification -- a corrected entity is exact
+// and known-real, not merely more confident, so it skips the low-confidence
+// verification search entirely rather than being routed through it.
+export function correctKnownEntitySubstitutions(plan: ResearchPlan): ResearchPlan {
+  if (!DATA_BROKER_TOPIC_RE.test(plan.topic)) return plan;
+
+  let corrected = false;
+  const entities = plan.entities.map((e) => {
+    if (
+      e.jurisdiction?.toLowerCase() !== "california" ||
+      !CCPA_ENTITY_RE.test(e.name) ||
+      CALIFORNIA_DATA_BROKER_OWN_SCOPE_RE.test(e.name)
+    ) {
+      return e;
+    }
+    corrected = true;
+    return { ...e, name: CALIFORNIA_DATA_BROKER_ENTITY_NAME, confidence: 100 };
+  });
+  if (corrected) {
+    console.warn(
+      `[research-plan] corrected known entity substitution: California CCPA/CPRA -> ${CALIFORNIA_DATA_BROKER_ENTITY_NAME} (topic: "${plan.topic}")`,
+    );
+  }
+  return corrected ? { ...plan, entities } : plan;
+}
+
 // Entities the model itself flagged as uncertain (see the CONFIDENCE
 // instruction in buildPrompt) get ONE targeted search before they're
 // trusted -- confirmed live: a low-confidence entity is exactly where the
@@ -300,7 +349,7 @@ export async function planResearch(question: string, fallback: PlanFallback, use
     return fallbackPlan(question, fallback, "Planning request failed.");
   }
 
-  const plan = parseResearchPlan(result, question, fallback);
+  const plan = correctKnownEntitySubstitutions(parseResearchPlan(result, question, fallback));
   const verifiedEntities = await verifyLowConfidenceEntities(plan.entities);
   return { ...plan, entities: verifiedEntities };
 }
