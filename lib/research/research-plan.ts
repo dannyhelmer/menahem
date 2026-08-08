@@ -104,7 +104,12 @@ function buildPrompt(question: string): string {
     "7. For each entity, also give a CONFIDENCE score from 0 to 100: how certain you are that this is the " +
     "CORRECT, EXACT, dedicated entity for the specific subject requested -- not merely that a law with this " +
     "name exists. A well-known but topically broader substitute must score LOW, even if you are fully " +
-    "confident that law itself is real -- confidence measures precision to the request, not existence.\n\n" +
+    "confident that law itself is real -- confidence measures precision to the request, not existence. This " +
+    "score must reflect YOUR OWN actual certainty for EACH entity INDIVIDUALLY -- never assign the same score " +
+    "to every entity in the list by default or out of habit. Your certainty almost always genuinely varies " +
+    "across a list like this (you know some jurisdictions' dedicated statutes precisely and others only " +
+    "approximately), and the scores must show that real variation, not a single flat number restated for " +
+    "each line.\n\n" +
     "Reply in EXACTLY this format, nothing else:\n" +
     "TOPIC: ...\n" +
     "JURISDICTION: ...\n" +
@@ -180,7 +185,17 @@ export function parseResearchPlan(raw: string, question: string, fallback: PlanF
 // trusted -- confirmed live: a low-confidence entity is exactly where the
 // model tends to substitute a well-known adjacent law for the dedicated
 // statute it isn't sure of, so this is the highest-value place to check.
-const ENTITY_VERIFICATION_CONFIDENCE_THRESHOLD = 70;
+//
+// Confirmed live gap: despite the prompt explicitly asking for per-entity
+// differentiation, the model sometimes still assigns the SAME score to
+// every entity in a list (70 across the board in one run, 80 in another)
+// rather than genuinely varying confidence -- when that score happens to
+// land exactly on the threshold, a strict "<" comparison lets it slip
+// through unverified. Deliberately inclusive ("<=") rather than raising
+// the threshold itself further, since the observed flat scores varied (70,
+// then 80) -- no single fixed cutoff reliably sits below every value the
+// model might flatten to, but "at or below a genuinely high bar" does.
+const ENTITY_VERIFICATION_CONFIDENCE_THRESHOLD = 85;
 
 // Words that don't distinguish this entity from any other law -- checking
 // for their presence in a search result would "confirm" almost anything.
@@ -245,15 +260,15 @@ async function verifyEntity(
 
 // Runs all verifications in parallel (one extra round-trip's worth of
 // latency total, not one per low-confidence entity) and returns the
-// original entity list with any unconfirmed ones removed. Entities at or
-// above the confidence threshold are returned untouched, unverified --
-// this is a targeted check for the model's OWN flagged uncertainty, not a
+// original entity list with any unconfirmed ones removed. Entities STRICTLY
+// ABOVE the confidence threshold are returned untouched, unverified -- this
+// is a targeted check for the model's OWN flagged uncertainty, not a
 // blanket re-verification of everything.
 export async function verifyLowConfidenceEntities(
   entities: ResearchPlanEntity[],
   searchFn: SearchFn = runSearchForMessage,
 ): Promise<ResearchPlanEntity[]> {
-  const lowConfidence = entities.filter((e) => e.confidence < ENTITY_VERIFICATION_CONFIDENCE_THRESHOLD);
+  const lowConfidence = entities.filter((e) => e.confidence <= ENTITY_VERIFICATION_CONFIDENCE_THRESHOLD);
   if (lowConfidence.length === 0) return entities;
 
   const results = await Promise.allSettled(lowConfidence.map((e) => verifyEntity(e, searchFn)));

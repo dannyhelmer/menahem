@@ -125,7 +125,7 @@ describe("parseResearchPlan", () => {
 });
 
 describe("verifyLowConfidenceEntities", () => {
-  const highConfidence: ResearchPlanEntity = { name: "Vermont Data Broker Law", jurisdiction: "Vermont", confidence: 85 };
+  const highConfidence: ResearchPlanEntity = { name: "Vermont Data Broker Law", jurisdiction: "Vermont", confidence: 95 };
 
   it("leaves high-confidence entities untouched and never calls search for them", () => {
     let called = false;
@@ -137,6 +137,23 @@ describe("verifyLowConfidenceEntities", () => {
       expect(result).toEqual([highConfidence]);
       expect(called).toBe(false);
     });
+  });
+
+  it("verifies an entity exactly AT the threshold, not just strictly below it -- the confirmed flat-score case", async () => {
+    // Confirmed live: the model sometimes assigns the SAME confidence to
+    // every entity in a list (e.g. 70 across the board in one run, 80 in
+    // another) instead of genuinely differentiating -- an exclusive "<"
+    // comparison would let a flat score sitting exactly on the threshold
+    // slip through unverified.
+    const entity: ResearchPlanEntity = { name: "California Consumer Privacy Act", jurisdiction: "California", confidence: 85 };
+    let called = false;
+    const fakeSearch = async () => {
+      called = true;
+      return { success: true, sources: [] };
+    };
+    const result = await verifyLowConfidenceEntities([entity], fakeSearch);
+    expect(called).toBe(true);
+    expect(result).toEqual([]); // no confirming source -- dropped
   });
 
   it("keeps a low-confidence entity confirmed by a search result containing its distinctive words", async () => {
