@@ -65,6 +65,7 @@ import { generateTitle } from "@/lib/memory/title";
 import { buildComparisonPacket } from "@/lib/research/comparison-packet";
 import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
+import { enforceLegislativeStatusLanguage } from "@/lib/research/legislative-status";
 import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
 import { planResearch } from "@/lib/research/research-plan";
@@ -1712,6 +1713,31 @@ export const POST = withAuth(async (request, _ctx, user) => {
             console.warn(`[citation-placeholder-link] ${count} placeholder link(s) flattened to plain text`);
           }
           assistantText = linkStripped;
+        }
+
+        // LEGISLATIVE STATUS LANGUAGE CHECK: confirmed gap -- the model got
+        // the **Current Status:** field itself right ("Pending / Referred
+        // to Committee" for Illinois HB4809/HB2913, live-verified against
+        // ilga.gov) but still described the SAME bill's provisions in
+        // present tense ("It requires...") as if already in force. Tied
+        // directly to each section's own already-verified status field
+        // rather than relying solely on the prompt instruction (which
+        // exists but wasn't being followed with full consistency) -- see
+        // lib/research/legislative-status.ts. Runs per-section (multi-part
+        // comparisons can have some entities enacted and others pending in
+        // the SAME response), and only ever touches a sentence that
+        // explicitly names the bill as its subject, so a genuine present-
+        // tense fact about existing law is never rewritten.
+        if (grounded) {
+          const { text: statusCorrected, corrections } = enforceLegislativeStatusLanguage(assistantText);
+          if (corrections.length > 0) {
+            console.warn(
+              `[legislative-status] conditional-language correction applied: ` +
+                corrections.map((c) => `"${c.section}" (${c.status}): ${c.verbsCorrected} verb(s)`).join(", "),
+            );
+            onStage(`⚠ Corrected verb tense for ${corrections.length} pending/non-enacted section${corrections.length === 1 ? "" : "s"}`);
+          }
+          assistantText = statusCorrected;
         }
 
         // CITATION GATE (single-question/comparison only, via
