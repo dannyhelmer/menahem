@@ -4,6 +4,7 @@ import { stateForDomain } from "./source-router";
 import type { SearchProvider, SearchResult } from "./types";
 import { sourceAuthorityRank, sourceTier } from "@/lib/research/source-tier";
 import { extractAllBillNumbers } from "@/lib/intelligence/bill-number";
+import { extractGeneralAssembly, isGeneralAssemblyMismatch } from "@/lib/intelligence/general-assembly";
 import {
   recordCandidate,
   recordFetchFailure,
@@ -82,6 +83,14 @@ export interface TaskContext {
   state?: string | null;
   billNumber?: string | null;
   taskQuestion?: string;
+  // Illinois-specific (see lib/intelligence/general-assembly.ts): the
+  // General Assembly this bill number is expected to belong to, when
+  // known -- the same bill number can be a completely different bill in a
+  // different GA (Illinois's 103rd GA HB4809 became law; the 104th GA's
+  // HB4809 is an unrelated, still-pending bill). Only ever set for
+  // Illinois bill-number tasks; null/undefined for every other state,
+  // where this check never runs at all.
+  expectedGeneralAssembly?: number | null;
 }
 
 // Dropped so relevance-checking isn't defeated by words that are shared by
@@ -488,6 +497,10 @@ export async function runSearchForMessage(
   // which is the actual fix; Fix 1's citation check is only a backstop for
   // whatever still gets through.
   const billNumber = options?.taskContext?.billNumber ?? null;
+  // Illinois-only (see lib/intelligence/general-assembly.ts) -- only ever
+  // set when the task resolved an Illinois bill number, so this check is a
+  // no-op for every other state/jurisdiction.
+  const expectedGeneralAssembly = options?.taskContext?.expectedGeneralAssembly ?? null;
   const rejectedUrls = new Set<string>();
   const fetched = rawFetched.filter((f) => {
     if (!passesRelevanceGate(significantTerms, scoreRelevance(significantTerms, f.title, f.text))) {
@@ -497,6 +510,23 @@ export async function runSearchForMessage(
     }
     if (billNumber && !extractAllBillNumbers(`${f.title} ${f.text}`).includes(billNumber)) {
       recordFiltered(options?.diagnostics, diagPhase, f.url, f.title, "bill_number_mismatch");
+      rejectedUrls.add(f.url);
+      return false;
+    }
+    // Confirmed live: Illinois's 103rd GA HB4809 (became law) and 104th GA
+    // HB4809 (a different, still-pending bill) share the identical
+    // normalized bill number, so the check above alone can't tell them
+    // apart. Reject only on an ACTIVE mismatch -- a page that doesn't
+    // explicitly state ANY General Assembly (many secondary sources don't)
+    // is never rejected on that basis alone, same fail-open design as the
+    // cross-state domain check above.
+    if (expectedGeneralAssembly && isGeneralAssemblyMismatch(`${f.title} ${f.text}`, expectedGeneralAssembly)) {
+      const foundGeneralAssembly = extractGeneralAssembly(`${f.title} ${f.text}`);
+      console.warn(
+        `[orchestrate] bill-number collision detected: ${billNumber} matched a ${foundGeneralAssembly}th General ` +
+          `Assembly record (${f.url}) while expecting the ${expectedGeneralAssembly}th -- rejecting, different bill`,
+      );
+      recordFiltered(options?.diagnostics, diagPhase, f.url, f.title, "general_assembly_mismatch");
       rejectedUrls.add(f.url);
       return false;
     }

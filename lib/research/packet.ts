@@ -20,6 +20,7 @@ import {
 } from "@/lib/search/retrieval-diagnostics";
 import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
 import { extractBillNumber } from "@/lib/intelligence/bill-number";
+import { currentIllinoisGeneralAssembly, extractGeneralAssembly } from "@/lib/intelligence/general-assembly";
 import { dedupeByUrl, sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
 
 const LEGISLATIVE_SUMMARY_INTENTS: PoliticalIntent[] = [
@@ -253,14 +254,20 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "row -- never display a placeholder like \"TBD\", \"N/A\", or \"unknown\" in a table cell. If exact statutory " +
   "sections can't be identified for the rows in a table, omit the Section column entirely rather than showing " +
   "incomplete data; the same rule applies to any other column you can't actually populate.\n\n" +
-  "Bill numbers restart every new Congress -- the same number (e.g. H.R. 1) can refer to a completely " +
-  "different bill in a different Congress. Before answering, explicitly determine and state: (1) which " +
-  "Congress the bill belongs to (e.g. 116th, 117th, 118th, 119th), (2) its official title, (3) whether it " +
-  "became law, and (4) that every provision you describe actually belongs to that specific bill in that " +
-  "specific Congress -- never blend in provisions, outcomes, or figures from a different bill that happens to " +
-  "share the same number. If the retrieved data or your own knowledge suggests two different bills share this " +
-  "number, stop and say plainly: \"Possible bill-number collision detected. H.R. numbers restart every " +
-  "Congress. These appear to be different bills.\" and address them separately rather than merging them.\n\n" +
+  "Bill numbers restart every new Congress federally, and every new legislative session at the state level -- " +
+  "the same number (e.g. H.R. 1, or a state's HB4809) can refer to a completely different bill in a different " +
+  "Congress or a different state legislative session (a General Assembly, in states that use that term). " +
+  "Confirmed real case: Illinois's 103rd General Assembly HB4809 became law; the 104th General Assembly's " +
+  "HB4809 is a completely different, still-pending bill -- an older bill's enacted status must never be " +
+  "applied to a same-numbered bill from a different session. Before answering, explicitly determine and state: " +
+  "(1) which Congress or state legislative session the bill belongs to (e.g. 116th-119th Congress federally, " +
+  "or a state's numbered General Assembly/session), (2) its official title, (3) whether it became law, and " +
+  "(4) that every provision you describe actually belongs to that specific bill in that specific session -- " +
+  "never blend in provisions, outcomes, or figures from a different bill that happens to share the same " +
+  "number. If the retrieved data or your own knowledge suggests two different bills share this number across " +
+  "different sessions, stop and say plainly: \"Possible bill-number collision detected. This number has been " +
+  "used in more than one legislative session. These appear to be different bills.\" and address them " +
+  "separately rather than merging them.\n\n" +
   "Before finalizing, compare every factual claim you've written against the retrieved sources one more time: " +
   "remove any statement that isn't actually supported, or that a source contradicts. When two retrieved sources " +
   "disagree on a specific fact (a vote total, an effective date, a fiscal estimate, the bill's current status), " +
@@ -522,6 +529,7 @@ export async function buildResearchPacket(
   // candidate set at all.
   const isLegislative = LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent));
   const searchQuery = isLegislative ? `${question} official legislature bill text status` : question;
+  const billNumber = extractBillNumber(question);
   // A wider raw candidate pool gives sortByAuthority (in orchestrate.ts,
   // applied before the top MAX_PAGES_TO_FETCH are actually fetched) more to
   // work with -- the official legislature's page is often organically
@@ -546,7 +554,19 @@ export async function buildResearchPacket(
     // everywhere -- but it only rejects wrong-state sources correctly once
     // `state` here is actually the per-subtask state (Fix 2), not a shared
     // outer value reused across unrelated subtasks.
-    taskContext: { state, billNumber: extractBillNumber(question), taskQuestion: question },
+    taskContext: {
+      state,
+      billNumber,
+      taskQuestion: question,
+      // Illinois-only: same bill number, different General Assembly, is a
+      // DIFFERENT bill (confirmed live: 103rd GA HB4809 became law; 104th
+      // GA HB4809 is an unrelated, still-pending bill). If the question
+      // itself names a specific GA, that's authoritative; otherwise default
+      // to the current one -- "prioritize the current/relevant General
+      // Assembly" for a question that doesn't specify a session.
+      expectedGeneralAssembly:
+        billNumber && state === "Illinois" ? extractGeneralAssembly(question) ?? currentIllinoisGeneralAssembly() : null,
+    },
   });
   if (searchResult.success && searchResult.liveData) {
     liveDataParts.push(searchResult.liveData);
