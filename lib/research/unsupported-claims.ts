@@ -39,6 +39,21 @@ function escapeRegex(s: string): string {
 // Boundaries where a field's own content ends -- the next known field
 // label this template produces, a "---" divider, a "##" heading (the
 // multi-part per-entity boundary), or end of the section.
+// The prompt asks for "a section headed exactly X" without pinning down a
+// specific markdown level, and the model renders these two ways in
+// practice depending on whether it treats the field as a top-level section
+// (e.g. "### Supporters Argue") or a bold sub-label within one (e.g.
+// "**Potential Impact:**" inside "Why It Matters") -- confirmed live, in
+// the SAME response, for the SAME template. A header-matching pattern that
+// only recognized one format would silently fail to find (and therefore
+// never check) a field rendered in the other, which defeats the point of
+// a MECHANICAL backstop -- it must not depend on which formatting choice
+// the model happened to make this time, any more than it should depend on
+// the model choosing to follow the attribution instruction at all.
+function headerPattern(label: string): string {
+  return `(?:\\*\\*${escapeRegex(label)}:?\\*\\*|#{2,4}\\s+${escapeRegex(label)}\\b)`;
+}
+
 const KNOWN_FIELD_LABELS = [
   "Supporters Argue",
   "Critics Argue",
@@ -51,7 +66,7 @@ const KNOWN_FIELD_LABELS = [
   "Documented Legislative Changes",
 ];
 const NEXT_BOUNDARY_RE = new RegExp(
-  `\\n\\s*(?:\\*\\*(?:${KNOWN_FIELD_LABELS.map(escapeRegex).join("|")}):?\\*\\*|-{3,}\\s*$|##\\s)`,
+  `\\n\\s*(?:${KNOWN_FIELD_LABELS.map(headerPattern).join("|")}|-{3,}\\s*$|#{2,4}\\s)`,
   "m",
 );
 
@@ -67,7 +82,7 @@ function extractField(sectionText: string, label: string): FieldSpan | null {
   // next "---" divider when a field is empty, eating the very newline the
   // boundary regex below needs to detect that divider, and silently
   // absorbing the divider itself into "content".
-  const headerMatch = sectionText.match(new RegExp(`\\*\\*${escapeRegex(label)}:?\\*\\*[ \\t]*\\n?`, "i"));
+  const headerMatch = sectionText.match(new RegExp(`${headerPattern(label)}[ \\t]*\\n?`, "i"));
   if (!headerMatch || headerMatch.index === undefined) return null;
   const contentStart = headerMatch.index + headerMatch[0].length;
   const rest = sectionText.slice(contentStart);

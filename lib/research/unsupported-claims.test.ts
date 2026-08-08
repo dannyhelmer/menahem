@@ -96,6 +96,52 @@ describe("enforceAttributedClaims -- safety boundaries", () => {
   });
 });
 
+describe("enforceAttributedClaims -- recognizes '### Label' heading style, not just '**Label:**' bold style", () => {
+  // Confirmed live: in the SAME response, for the SAME template, the model
+  // rendered "Supporters Argue"/"Critics Argue" as "### " headings while
+  // rendering "Potential Impact" (a sub-label inside "Why It Matters") as
+  // bold -- a checker that only recognized one format would silently skip
+  // whichever fields happened to use the other, which defeats the point of
+  // a mechanical (not prompt-compliance-dependent) backstop.
+  it("replaces an unattributed Supporters/Critics Argue rendered as '### ' headings", () => {
+    const text =
+      "**Bill Number:** HB4809\n\n" +
+      "### Overview\nThe bill would require data brokers to register.\n\n" +
+      "### Supporters Argue\nSupporters argued that the bill would enhance consumer privacy.\n\n" +
+      "### Critics Argue\nCritics expressed concerns about the effectiveness of enforcement.\n\n" +
+      "### Why It Matters\n\n" +
+      "**Who Is Affected:**\n- Data Brokers\n\n" +
+      "**Potential Impact:**  \nThe legislation could significantly affect data broker operations.\n\n" +
+      "### Verification\n- Confirmed against the official record.\n";
+
+    const { text: result, corrections } = enforceAttributedClaims(text);
+
+    expect(result).toContain("### Supporters Argue\nNo supporter statements for this bill were found in retrieved sources.");
+    expect(result).toContain("### Critics Argue\nNo critic statements for this bill were found in retrieved sources.");
+    expect(result).toContain(
+      "**Potential Impact:**  \n**Policy Analysis (inference from the bill's own provisions -- not a reported or projected impact from a retrieved source):** The legislation could significantly affect data broker operations.",
+    );
+    expect(corrections).toEqual([
+      { section: "(single section)", field: "Supporters Argue", action: "replaced" },
+      { section: "(single section)", field: "Critics Argue", action: "replaced" },
+      { section: "(single section)", field: "Potential Impact", action: "labeled" },
+    ]);
+  });
+
+  it("leaves a '### ' heading-style Supporters Argue untouched when genuinely attributed", () => {
+    const text =
+      "### Overview\nThe bill would require data brokers to register.\n\n" +
+      "### Supporters Argue\nSupporters testified before the Rules Committee that the bill closes a privacy gap.\n\n" +
+      "### Critics Argue\nCritics questioned enforcement funding.\n";
+    const { text: result, corrections } = enforceAttributedClaims(text);
+    expect(result).toContain("Supporters testified before the Rules Committee that the bill closes a privacy gap.");
+    // Critics Argue here has no attribution signal, so it's still corrected --
+    // this confirms the untouched Supporters Argue result above isn't just
+    // because the whole function no-op'd.
+    expect(corrections).toEqual([{ section: "(single section)", field: "Critics Argue", action: "replaced" }]);
+  });
+});
+
 describe("enforceAttributedClaims -- per-section scoping in multi-part comparisons", () => {
   it("corrects only the unattributed section, leaving a genuinely attributed section untouched", () => {
     const text =
