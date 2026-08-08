@@ -85,11 +85,39 @@ describe("enforceCaliforniaDataBrokerAttribution -- does not touch a section alr
   });
 });
 
-describe("enforceCaliforniaDataBrokerAttribution -- CalPPA correction applies globally", () => {
+describe("enforceCaliforniaDataBrokerAttribution -- agency-name correction applies globally", () => {
   it("corrects CalPPA to CPPA even outside a CCPA-headed section", () => {
     const text = "## California Delete Act (SB 362)\n\nData brokers register with CalPPA annually.\n";
     const { text: result, corrections } = enforceCaliforniaDataBrokerAttribution(text);
     expect(result).toContain("register with CPPA annually");
     expect(corrections).toEqual([{ section: "(whole response)", kind: "cpp-agency-name", count: 1 }]);
+  });
+
+  it("corrects a DIFFERENT invented abbreviation ('CalPrivacy') the same way -- the confirmed second real-world variant", () => {
+    const text =
+      "## California Delete Act (SB 362)\n\n" +
+      "Data brokers register annually with the California Privacy Protection Agency (CalPrivacy). " +
+      "CalPrivacy is now responsible for enforcement.\n";
+    const { text: result, corrections } = enforceCaliforniaDataBrokerAttribution(text);
+    expect(result).toContain("California Privacy Protection Agency (CPPA)");
+    expect(result).toContain("CPPA is now responsible for enforcement.");
+    expect(result).not.toContain("CalPrivacy");
+    expect(corrections).toEqual([{ section: "(whole response)", kind: "cpp-agency-name", count: 2 }]);
+  });
+
+  it("corrects ANY parenthetical abbreviation following the agency's full name, not just the two known variants", () => {
+    // Confirmed the model invents a different one each time -- this proves
+    // the fix isn't limited to a fixed list of previously-seen strings.
+    const text = "The California Privacy Protection Agency (CalPPB) oversees enforcement.";
+    const { text: result, corrections } = enforceCaliforniaDataBrokerAttribution(text);
+    expect(result).toBe("The California Privacy Protection Agency (CPPA) oversees enforcement.");
+    expect(corrections).toEqual([{ section: "(whole response)", kind: "cpp-agency-name", count: 1 }]);
+  });
+
+  it("leaves the agency name untouched when it already correctly says CPPA", () => {
+    const text = "The California Privacy Protection Agency (CPPA) oversees enforcement.";
+    const { text: result, corrections } = enforceCaliforniaDataBrokerAttribution(text);
+    expect(result).toBe(text);
+    expect(corrections).toEqual([]);
   });
 });

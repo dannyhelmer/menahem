@@ -81,16 +81,34 @@ export interface EntityAttributionCorrection {
 }
 
 // CPPA is the agency's own, official abbreviation (established by the
-// CPRA/Prop 24) -- "CalPPA" is not a real variant, just a plausible-
-// sounding one the model sometimes produces. Corrected globally, not
-// scoped to CCPA-headed sections, since it's a plain name error wherever
-// it appears.
+// CPRA/Prop 24) -- confirmed live, TWICE, with a DIFFERENT invented
+// abbreviation each time ("CalPPA" in one run, "CalPrivacy" in another),
+// meaning a curated list of specific wrong strings alone will keep missing
+// whatever plausible-sounding variant the model invents next. Two
+// complementary checks: (1) whenever the agency's full name is followed by
+// a parenthetical abbreviation that ISN'T "CPPA", correct it, regardless
+// of what the wrong abbreviation happens to be -- this catches any future
+// invented variant, not just the two seen so far; (2) a short curated list
+// of the confirmed-wrong variants, corrected wherever they appear
+// standalone later in the text (a second mention often doesn't restate the
+// full agency name each time). Corrected globally, not scoped to
+// CCPA-headed sections, since it's a plain name error wherever it appears.
+const AGENCY_FULL_NAME_PAREN_RE = /\bCalifornia Privacy Protection Agency\s*\(([^)]{2,25})\)/g;
+const KNOWN_WRONG_AGENCY_ABBREVIATIONS = ["CalPPA", "CalPrivacy"];
+
 function correctAgencyName(text: string): { text: string; count: number } {
   let count = 0;
-  const corrected = text.replace(/\bCalPPA\b/g, () => {
+  let corrected = text.replace(AGENCY_FULL_NAME_PAREN_RE, (match, abbreviation: string) => {
+    if (abbreviation === "CPPA") return match;
     count++;
-    return "CPPA";
+    return "California Privacy Protection Agency (CPPA)";
   });
+  for (const wrong of KNOWN_WRONG_AGENCY_ABBREVIATIONS) {
+    corrected = corrected.replace(new RegExp(`\\b${wrong}\\b`, "g"), () => {
+      count++;
+      return "CPPA";
+    });
+  }
   return { text: corrected, count };
 }
 
