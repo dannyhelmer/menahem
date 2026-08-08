@@ -136,7 +136,15 @@ const LEGISLATIVE_SUMMARY_INSTRUCTIONS =
   "argued that...\". Name the actual venue when you know it (Congressional Record, committee report, sponsor " +
   "statement, a named organization's public statement, a CBO or GAO analysis) -- but never invent one that " +
   "wasn't actually in the sources you were given; attributing to a specific-sounding but unverified occasion is " +
-  "its own form of fabrication, so \"argued that...\" with no venue is correct and preferred over guessing one; " +
+  "its own form of fabrication, so \"argued that...\" with no venue is correct and preferred over guessing one -- " +
+  "but that allowance covers not knowing WHICH venue, never whether the argument was made at all: it still " +
+  "requires that a retrieved source actually reports someone taking that position. If nothing retrieved reports " +
+  "any supporter or critic reaction to this specific bill at all (a common case for a bill so new that only " +
+  "procedural bill-status pages exist yet, with no debate coverage or advocacy statements retrieved), do not " +
+  "reason from the bill's own stated purpose to a plausible-sounding position nobody has actually been reported " +
+  "taking -- write exactly \"No supporter statements for this bill were found in retrieved sources.\" or \"No " +
+  "critic statements for this bill were found in retrieved sources.\" instead of the section's usual content; " +
+  "the section header still appears, just with that sentence as its entire body; " +
   "(5) \"Why It Matters\", structured as two short parts -- do not summarize the bill again here, only answer " +
   "these two questions: \"Who Is Affected\": a short bulleted list of the actual stakeholder categories this " +
   "bill concretely affects (drawn from real categories like taxpayers, state governments, healthcare providers, " +

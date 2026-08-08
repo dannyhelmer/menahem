@@ -68,6 +68,7 @@ import { enforceLegislativeStatusLanguage } from "@/lib/research/legislative-sta
 import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
 import { planResearch } from "@/lib/research/research-plan";
+import { enforceAttributedClaims } from "@/lib/research/unsupported-claims";
 import {
   enforceSectionCitationScope,
   filterUsedSources,
@@ -1744,6 +1745,34 @@ export const POST = withAuth(async (request, _ctx, user) => {
             onStage(`⚠ Corrected verb tense for ${corrections.length} pending/non-enacted section${corrections.length === 1 ? "" : "s"}`);
           }
           assistantText = statusCorrected;
+        }
+
+        // UNSUPPORTED-CLAIM CHECK: confirmed live -- for Illinois HB4809
+        // with retrieval so thin the response opened with "Official
+        // legislative source could not be retrieved." and cited only
+        // procedural bill-status/listing pages, the model still wrote a
+        // "Supporters Argue"/"Critics Argue" section with entirely
+        // invented, zero-attribution positions. The prompt already forbids
+        // this in detail, but prompt compliance alone wasn't reliable
+        // here -- same class of gap as the legislative-status check above.
+        // See lib/research/unsupported-claims.ts. Runs per-section like the
+        // check above; a field with no concrete attribution signal is
+        // either replaced with an honest "not found in retrieved sources"
+        // statement (Supporters/Critics Argue -- fabricated attributed
+        // speech, not legitimate inference) or explicitly labeled as policy
+        // analysis (Potential Impact -- the prompt already sanctions this
+        // field as the model's own synthesis, so it's relabeled rather than
+        // removed).
+        if (grounded) {
+          const { text: claimsCorrected, corrections: claimCorrections } = enforceAttributedClaims(assistantText);
+          if (claimCorrections.length > 0) {
+            console.warn(
+              `[unsupported-claims] correction applied: ` +
+                claimCorrections.map((c) => `"${c.section}" ${c.field} (${c.action})`).join(", "),
+            );
+            onStage(`⚠ Flagged ${claimCorrections.length} unattributed claim${claimCorrections.length === 1 ? "" : "s"}`);
+          }
+          assistantText = claimsCorrected;
         }
 
         // CITATION GATE (single-question/comparison only, via
