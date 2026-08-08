@@ -97,6 +97,46 @@ export interface PrimarySourceCorrection {
 
 const SECTION_HEADING_RE = /^##\s+(.+)$/gm;
 
+// Confirmed live: for "What does Illinois's BIPA law require of
+// employers?", the retrieved official set included a genuinely different
+// Illinois statute (the Right to Privacy in the Workplace Act, 820 ILCS
+// 55 -- a real, separate law) alongside the cited secondary source on
+// BIPA specifically (740 ILCS 14). Both are tier "government", but
+// attaching the wrong one would introduce a NEW misattribution in the act
+// of trying to fix a citation-preference gap -- worse than the original
+// problem. A shared-tier check alone can't tell them apart; this requires
+// the official candidate to share an actual distinguishing word with
+// whatever secondary source the section already cites (its title is a
+// reasonable proxy for the section's real subject, since the model DID
+// choose to cite it), filtered against words too generic to distinguish
+// one law from another ("act", "privacy", "state") the same way
+// research-plan.ts's distinctiveWords filters entity names for the
+// analogous problem there.
+const RELEVANCE_STOPWORDS = new Set([
+  "the", "of", "and", "or", "for", "with", "from", "into", "onto", "your", "their",
+  "act", "acts", "law", "laws", "bill", "bills", "code", "codes",
+  "state", "official", "government", "right", "rights", "rule", "rules",
+  "privacy", "protection", "information", "data", "regulation", "regulations",
+]);
+
+function significantWords(title: string): Set<string> {
+  return new Set(
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !RELEVANCE_STOPWORDS.has(w)),
+  );
+}
+
+function sharesSignificantWord(titleA: string, titleB: string): boolean {
+  const wordsB = significantWords(titleB);
+  for (const w of significantWords(titleA)) {
+    if (wordsB.has(w)) return true;
+  }
+  return false;
+}
+
 // Fix (primary-source citation preference): hasUnusedOfficialSource above
 // only ever appended a caveat warning when an official source went
 // uncited -- it never actually got the official source INTO the response.
@@ -164,10 +204,21 @@ export function enforcePrimarySourceCitation(
     // so there's no preference violation to correct (a section with no
     // citations at all is a different problem findFabricatedCitations/
     // hasOfficialCitation already cover elsewhere).
-    const citedSecondary = sectionSources.some((s) => s.tier !== "government" && isSourceReferenced(sectionText, s));
-    if (!citedSecondary) continue;
+    const citedSecondarySources = sectionSources.filter((s) => s.tier !== "government" && isSourceReferenced(sectionText, s));
+    if (citedSecondarySources.length === 0) continue;
 
-    const target = officialSources[0];
+    // Only attach an official candidate that plausibly covers the SAME
+    // subject as what's already cited -- never the first/any official
+    // source merely because it's tier "government" (see the confirmed
+    // BIPA/Right to Privacy in the Workplace Act mismatch above). No
+    // qualifying candidate means don't guess -- fail open, matching this
+    // codebase's established convention everywhere else a mechanical
+    // check can't verify content, not just structure.
+    const target = officialSources.find((official) =>
+      citedSecondarySources.some((secondary) => sharesSignificantWord(official.title, secondary.title)),
+    );
+    if (!target) continue;
+
     const addition = `\n\nThe official record also confirms this: [${target.title}](${target.url}).`;
     result = result.slice(0, end) + addition + result.slice(end);
     corrections.push({ section: key, url: target.url });

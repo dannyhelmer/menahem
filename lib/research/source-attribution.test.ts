@@ -175,6 +175,55 @@ describe("enforcePrimarySourceCitation", () => {
     expect(corrections).toEqual([]);
   });
 
+  it("does not attach an official source about a DIFFERENT law even though it's also tier government -- the confirmed BIPA case", () => {
+    // Confirmed live: for a question about Illinois's BIPA (740 ILCS 14),
+    // retrieval also returned the Right to Privacy in the Workplace Act
+    // (820 ILCS 55) -- a real, genuinely different Illinois statute, also
+    // tier "government". Attaching it would have been a NEW
+    // misattribution introduced by the very fix meant to prevent one.
+    const wrongOfficialSource = {
+      title: "Right to Privacy in the Workplace Act",
+      url: "https://labor.illinois.gov/laws-rules/conmed/privacy-workplace.html",
+      tier: "government",
+    };
+    const bipaSecondary = {
+      title: "BIPA Law: Your Private Biometric Data, Your Employer's Access to It, and Your Rights",
+      url: "https://www.forthepeople.com/blog/bipa-law",
+      tier: "general",
+    };
+    const text = `BIPA requires written consent before collecting biometric data ([source](${bipaSecondary.url})).`;
+    const { text: result, corrections } = enforcePrimarySourceCitation(text, [
+      { key: "", sources: [wrongOfficialSource, bipaSecondary] },
+    ]);
+    expect(result).toBe(text);
+    expect(corrections).toEqual([]);
+  });
+
+  it("still attaches a topically-relevant official source when a DIFFERENT-subject official source is also present", () => {
+    const wrongOfficialSource = {
+      title: "Right to Privacy in the Workplace Act",
+      url: "https://labor.illinois.gov/laws-rules/conmed/privacy-workplace.html",
+      tier: "government",
+    };
+    const bipaOfficial = {
+      title: "Biometric Information Privacy Act - Illinois Compiled Statutes",
+      url: "https://www.ilga.gov/legislation/ilcs/ilcs3.asp?ActID=2951",
+      tier: "government",
+    };
+    const bipaSecondary = {
+      title: "BIPA Law: Your Private Biometric Data, Your Employer's Access to It, and Your Rights",
+      url: "https://www.forthepeople.com/blog/bipa-law",
+      tier: "general",
+    };
+    const text = `BIPA requires written consent before collecting biometric data ([source](${bipaSecondary.url})).`;
+    const { text: result, corrections } = enforcePrimarySourceCitation(text, [
+      { key: "", sources: [wrongOfficialSource, bipaOfficial, bipaSecondary] },
+    ]);
+    expect(result).toContain(bipaOfficial.url);
+    expect(result).not.toContain(wrongOfficialSource.url);
+    expect(corrections).toEqual([{ section: "(single section)", url: bipaOfficial.url }]);
+  });
+
   it("does nothing when there are no sources in context at all", () => {
     const text = "Nothing was retrieved for this question.";
     expect(enforcePrimarySourceCitation(text, [])).toEqual({ text, corrections: [] });
