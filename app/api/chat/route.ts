@@ -71,6 +71,7 @@ import { enforceCaliforniaDataBrokerAttribution } from "@/lib/research/entity-at
 import { planResearch } from "@/lib/research/research-plan";
 import { enforceAttributedClaims } from "@/lib/research/unsupported-claims";
 import {
+  enforcePrimarySourceCitation,
   enforceSectionCitationScope,
   filterUsedSources,
   findFabricatedCitations,
@@ -1799,6 +1800,35 @@ export const POST = withAuth(async (request, _ctx, user) => {
             onStage(`⚠ Corrected ${attributionCorrections.length} entity/provision attribution issue${attributionCorrections.length === 1 ? "" : "s"}`);
           }
           assistantText = attributionCorrected;
+        }
+
+        // PRIMARY-SOURCE CITATION PREFERENCE: hasUnusedOfficialSource
+        // (further below) only ever appended a caveat warning when an
+        // official source went uncited -- it never actually got the
+        // official source into the response. The prompt already instructs
+        // the model at length to prefer an official legislative/statutory/
+        // judicial/state-government source over a secondary one for the
+        // same fact, but that compliance keeps failing the same way it has
+        // for every other discipline this file now mechanically enforces.
+        // Runs BEFORE the citation gate below on purpose: attaching the
+        // missing official citation can turn a response the gate would
+        // otherwise discard entirely into one that legitimately passes it,
+        // which is a strictly better outcome than throwing away real,
+        // useful content. See lib/research/source-attribution.ts.
+        if (grounded) {
+          const primarySourceSections = sections ?? [{ key: "", sources: (allSources ?? []) as TieredSource[] }];
+          const { text: primarySourceCorrected, corrections: primarySourceCorrections } = enforcePrimarySourceCitation(
+            assistantText,
+            primarySourceSections,
+          );
+          if (primarySourceCorrections.length > 0) {
+            console.warn(
+              `[primary-source] official citation attached: ` +
+                primarySourceCorrections.map((c) => `"${c.section}" -> ${c.url}`).join(", "),
+            );
+            onStage(`⚠ Attached ${primarySourceCorrections.length} missing official citation${primarySourceCorrections.length === 1 ? "" : "s"}`);
+          }
+          assistantText = primarySourceCorrected;
         }
 
         // CITATION GATE (single-question/comparison only, via

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  enforcePrimarySourceCitation,
   enforceSectionCitationScope,
   findFabricatedCitations,
   hasOfficialCitation,
@@ -122,6 +123,102 @@ describe("hasUnusedOfficialSource", () => {
 
   it("is false when nothing was retrieved at all", () => {
     expect(hasUnusedOfficialSource([], [])).toBe(false);
+  });
+});
+
+describe("enforcePrimarySourceCitation", () => {
+  const officialSource = {
+    title: "Illinois General Assembly - Bill Status of HB4809",
+    url: "https://ilga.gov/Legislation/BillStatus?DocNum=4809",
+    tier: "government",
+  };
+  const secondarySource = {
+    title: "LegiScan - IL HB4809",
+    url: "https://legiscan.com/IL/bill/HB4809/2025",
+    tier: "general",
+  };
+
+  it("attaches the official source when only a secondary source is cited -- the confirmed validation case", () => {
+    const text = "HB4809 would require data brokers to register annually [LegiScan](https://legiscan.com/IL/bill/HB4809/2025).";
+    const { text: result, corrections } = enforcePrimarySourceCitation(text, [
+      { key: "", sources: [officialSource, secondarySource] },
+    ]);
+
+    expect(result).toContain(officialSource.url);
+    // The secondary source is preserved, not removed.
+    expect(result).toContain(secondarySource.url);
+    expect(corrections).toEqual([{ section: "(single section)", url: officialSource.url }]);
+  });
+
+  it("does nothing when the official source is already cited", () => {
+    const text = `HB4809 would require data brokers to register [Illinois General Assembly](${officialSource.url}).`;
+    const { text: result, corrections } = enforcePrimarySourceCitation(text, [
+      { key: "", sources: [officialSource, secondarySource] },
+    ]);
+    expect(result).toBe(text);
+    expect(corrections).toEqual([]);
+  });
+
+  it("does nothing when no official source was retrieved at all", () => {
+    const text = `Per [LegiScan](${secondarySource.url}), the bill was introduced.`;
+    const { text: result, corrections } = enforcePrimarySourceCitation(text, [{ key: "", sources: [secondarySource] }]);
+    expect(result).toBe(text);
+    expect(corrections).toEqual([]);
+  });
+
+  it("does nothing when no secondary source is cited either -- nothing relied on a lesser source", () => {
+    const text = "This response cites nothing at all yet.";
+    const { text: result, corrections } = enforcePrimarySourceCitation(text, [
+      { key: "", sources: [officialSource, secondarySource] },
+    ]);
+    expect(result).toBe(text);
+    expect(corrections).toEqual([]);
+  });
+
+  it("does nothing when there are no sources in context at all", () => {
+    const text = "Nothing was retrieved for this question.";
+    expect(enforcePrimarySourceCitation(text, [])).toEqual({ text, corrections: [] });
+  });
+
+  describe("per-section scoping in multi-part comparisons", () => {
+    // Title deliberately uses a longer, more specific distinguishing clause
+    // ("Bill Status of HB4809", not just "HB4809") -- a bare bill number is
+    // short enough that it coincidentally appears in ordinary prose about
+    // the bill itself, which would make isSourceReferenced's title-clause
+    // match false-positive on prose that never actually cites this URL.
+    const illinoisOfficial = {
+      title: "Illinois General Assembly - Bill Status of HB4809",
+      url: "https://ilga.gov/BillStatus?4809",
+      tier: "government",
+    };
+    const illinoisSecondary = { title: "LegiScan - HB4809", url: "https://legiscan.com/IL/HB4809", tier: "general" };
+    const californiaOfficial = {
+      title: "California Legislative Information - SB 362",
+      url: "https://leginfo.legislature.ca.gov/SB362",
+      tier: "government",
+    };
+    const californiaSecondary = { title: "Byte Back - Delete Act", url: "https://bytebacklaw.com/delete-act", tier: "general" };
+
+    it("attaches each section's own uncited official source independently, leaving an already-correct section untouched", () => {
+      const text =
+        "## Illinois\n\n" +
+        `HB4809 would require registration [LegiScan](${illinoisSecondary.url}).\n\n` +
+        "## California\n\n" +
+        `The Delete Act requires registration [California Legislative Information](${californiaOfficial.url}), ` +
+        `as also reported by [Byte Back](${californiaSecondary.url}).\n`;
+
+      const { text: result, corrections } = enforcePrimarySourceCitation(text, [
+        { key: "Illinois", sources: [illinoisOfficial, illinoisSecondary] },
+        { key: "California", sources: [californiaOfficial, californiaSecondary] },
+      ]);
+
+      expect(result).toContain(illinoisOfficial.url);
+      // California's section already cited its own official source -- no
+      // duplicate addition.
+      const californiaOccurrences = result.split(californiaOfficial.url).length - 1;
+      expect(californiaOccurrences).toBe(1);
+      expect(corrections).toEqual([{ section: "Illinois", url: illinoisOfficial.url }]);
+    });
   });
 });
 

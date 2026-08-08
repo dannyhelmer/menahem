@@ -85,6 +85,97 @@ export function hasUnusedOfficialSource<T extends { tier: string }>(allSources: 
   return allSources.some((s) => s.tier === "government") && !usedSources.some((s) => s.tier === "government");
 }
 
+export interface PrimarySourceSection {
+  key: string;
+  sources: { title: string; url: string; tier: string }[];
+}
+
+export interface PrimarySourceCorrection {
+  section: string;
+  url: string;
+}
+
+const SECTION_HEADING_RE = /^##\s+(.+)$/gm;
+
+// Fix (primary-source citation preference): hasUnusedOfficialSource above
+// only ever appended a caveat warning when an official source went
+// uncited -- it never actually got the official source INTO the response.
+// Confirmed live, repeatedly, across this whole project: the prompt
+// already instructs the model at length to prefer an official legislative/
+// statutory/judicial/state-government source over a secondary one for the
+// same fact (see the priority-order instructions in packet.ts), but prompt
+// compliance alone keeps failing here the same way it has for every other
+// discipline this codebase now mechanically enforces (verb tense, claim
+// attribution, entity naming) -- an official source can be retrieved,
+// ranked, and available in context, and the model still writes the answer
+// around secondary sources alone.
+//
+// This does not try to determine which SPECIFIC sentence's claim an
+// available official source supports -- that's a reading-comprehension
+// judgment a regex can't make, and guessing wrong risks attaching a
+// citation to a claim it doesn't actually back. What it CAN guarantee
+// mechanically, and what the Sources-list-only status quo was actually
+// missing, is that the official source ends up cited IN THE BODY at all
+// when the section already relies on secondary sources for the same
+// topic -- appended as its own real, verifiable sentence rather than
+// inserted into existing prose at a guessed position. Secondary sources
+// already cited are never removed here: the prompt's own comprehension-
+// level judgment (drop a secondary source once it's genuinely redundant
+// with the official record) isn't something this mechanical pass can
+// verify either, so it leaves that decision alone and only adds what it
+// can be sure is missing.
+export function enforcePrimarySourceCitation(
+  text: string,
+  sections: PrimarySourceSection[],
+): { text: string; corrections: PrimarySourceCorrection[] } {
+  const headingMatches = [...text.matchAll(SECTION_HEADING_RE)];
+  const spans =
+    headingMatches.length > 0
+      ? headingMatches.map((m, i) => ({
+          key: m[1].trim(),
+          start: m.index + m[0].length,
+          end: i + 1 < headingMatches.length ? headingMatches[i + 1].index! : text.length,
+        }))
+      : [{ key: "(single section)", start: 0, end: text.length }];
+
+  const sourcesByKey = new Map(sections.map((s) => [s.key, s.sources]));
+  // No "##" headings in the text at all -- a single-question response, so
+  // every source across every passed-in section entry belongs to that one
+  // implicit section (the single-question caller passes exactly one entry
+  // anyway; this just avoids requiring it to know that in advance).
+  const wholeTextSources = sections.flatMap((s) => s.sources);
+
+  const corrections: PrimarySourceCorrection[] = [];
+  let result = text;
+  // Process spans in reverse so an earlier span's positions stay valid as
+  // a later span's insertion extends the text after it -- same convention
+  // as every other mechanical corrector in this codebase.
+  for (let i = spans.length - 1; i >= 0; i--) {
+    const { key, start, end } = spans[i];
+    const sectionSources = headingMatches.length > 0 ? (sourcesByKey.get(key) ?? []) : wholeTextSources;
+    const officialSources = sectionSources.filter((s) => s.tier === "government");
+    if (officialSources.length === 0) continue;
+
+    const sectionText = result.slice(start, end);
+    if (officialSources.some((s) => isSourceReferenced(sectionText, s))) continue;
+
+    // An official source went uncited, but so did every secondary one --
+    // nothing in this section actually relied on a lesser source instead,
+    // so there's no preference violation to correct (a section with no
+    // citations at all is a different problem findFabricatedCitations/
+    // hasOfficialCitation already cover elsewhere).
+    const citedSecondary = sectionSources.some((s) => s.tier !== "government" && isSourceReferenced(sectionText, s));
+    if (!citedSecondary) continue;
+
+    const target = officialSources[0];
+    const addition = `\n\nThe official record also confirms this: [${target.title}](${target.url}).`;
+    result = result.slice(0, end) + addition + result.slice(end);
+    corrections.push({ section: key, url: target.url });
+  }
+  corrections.reverse();
+  return { text: result, corrections };
+}
+
 // Normalizes a URL for comparison purposes only (never for display) --
 // lowercases the host, strips a leading "www." and a single trailing slash.
 // Deliberately leaves path/query untouched: over-normalizing (e.g. ignoring
