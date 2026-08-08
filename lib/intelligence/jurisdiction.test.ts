@@ -86,3 +86,45 @@ describe("resolveJurisdictionAndState", () => {
     expect(result.jurisdiction).toBe("local");
   });
 });
+
+describe("resolveJurisdictionAndState -- Illinois HB/SB and General Assembly session evidence with no state named", () => {
+  // Confirmed live gap: this exact question triggered "Which jurisdiction
+  // do you mean? Illinois or Federal?" even though "General Assembly" is
+  // state-only terminology (Congress never uses it) and "HB4809" is never
+  // federal notation (federal bills are always "H.R.").
+  it("resolves Illinois for an HB number + explicit General Assembly session, no state named", () => {
+    const result = resolveJurisdictionAndState("What happened to HB4809 in the 103rd General Assembly?", intentSet("state_legislation"));
+    expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
+  });
+
+  it("resolves Illinois for a bare HB number with no session and no state named", () => {
+    const result = resolveJurisdictionAndState("What is the current status of HB4809?", intentSet("state_legislation"));
+    expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
+  });
+
+  it("resolves Illinois for a bare SB number with no session and no state named", () => {
+    const result = resolveJurisdictionAndState("What is SB3219 about?", intentSet("state_legislation"));
+    expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
+  });
+
+  it("resolves Illinois for the same bill compared across two General Assemblies, no state named", () => {
+    const result = resolveJurisdictionAndState(
+      "Compare HB4809 in the 103rd and 104th General Assemblies.",
+      intentSet("state_legislation"),
+    );
+    expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
+  });
+
+  it("does not override an explicitly different state's own HB number", () => {
+    // A different state's own bill number, with that state named, must
+    // keep winning -- the Illinois assumption only fills in when NO other
+    // state is named at all.
+    const result = resolveJurisdictionAndState("What does Texas HB 100 do?", intentSet("state_legislation"));
+    expect(result).toEqual({ jurisdiction: "state", state: "Texas" });
+  });
+
+  it("resolves Illinois for a General Assembly session reference with no bill number at all", () => {
+    const result = resolveJurisdictionAndState("What bills passed the 104th General Assembly?", intentSet());
+    expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
+  });
+});

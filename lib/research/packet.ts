@@ -20,7 +20,7 @@ import {
 } from "@/lib/search/retrieval-diagnostics";
 import { detectRecencyNeed } from "@/lib/intelligence/web-search-intent";
 import { extractBillNumber } from "@/lib/intelligence/bill-number";
-import { currentIllinoisGeneralAssembly, extractGeneralAssembly } from "@/lib/intelligence/general-assembly";
+import { currentIllinoisGeneralAssembly, extractAllGeneralAssemblies } from "@/lib/intelligence/general-assembly";
 import { dedupeByUrl, sortByAuthority, sourceTier, type SourceTier } from "./source-tier";
 
 const LEGISLATIVE_SUMMARY_INTENTS: PoliticalIntent[] = [
@@ -461,6 +461,26 @@ function selectGovProviders(intents: Set<PoliticalIntent>, routing: Jurisdiction
   return providers;
 }
 
+// Illinois-only: same bill number, different General Assembly, is a
+// DIFFERENT bill (confirmed live: 103rd GA HB4809 became law; 104th GA
+// HB4809 is an unrelated, still-pending bill). If the question itself
+// names exactly one specific GA, that's authoritative; otherwise default
+// to the current one -- "prioritize the current/relevant General Assembly"
+// for a question that doesn't specify a session. When the question
+// explicitly names TWO OR MORE sessions ("Compare HB4809 in the 103rd and
+// 104th General Assemblies"), it's asking about more than one on purpose
+// -- return null so neither session's candidates get rejected; the
+// bill-collision prompt instruction (in the shared instructions array
+// below) is what keeps the two from being conflated in the output.
+export function computeExpectedGeneralAssembly(
+  billNumber: string | null,
+  state: string | null,
+  questionGeneralAssemblies: number[],
+): number | null {
+  if (!billNumber || state !== "Illinois" || questionGeneralAssemblies.length > 1) return null;
+  return questionGeneralAssemblies[0] ?? currentIllinoisGeneralAssembly();
+}
+
 export async function buildResearchPacket(
   question: string,
   intents: Set<PoliticalIntent>,
@@ -530,6 +550,7 @@ export async function buildResearchPacket(
   const isLegislative = LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent));
   const searchQuery = isLegislative ? `${question} official legislature bill text status` : question;
   const billNumber = extractBillNumber(question);
+  const questionGeneralAssemblies = extractAllGeneralAssemblies(question);
   // A wider raw candidate pool gives sortByAuthority (in orchestrate.ts,
   // applied before the top MAX_PAGES_TO_FETCH are actually fetched) more to
   // work with -- the official legislature's page is often organically
@@ -558,14 +579,7 @@ export async function buildResearchPacket(
       state,
       billNumber,
       taskQuestion: question,
-      // Illinois-only: same bill number, different General Assembly, is a
-      // DIFFERENT bill (confirmed live: 103rd GA HB4809 became law; 104th
-      // GA HB4809 is an unrelated, still-pending bill). If the question
-      // itself names a specific GA, that's authoritative; otherwise default
-      // to the current one -- "prioritize the current/relevant General
-      // Assembly" for a question that doesn't specify a session.
-      expectedGeneralAssembly:
-        billNumber && state === "Illinois" ? extractGeneralAssembly(question) ?? currentIllinoisGeneralAssembly() : null,
+      expectedGeneralAssembly: computeExpectedGeneralAssembly(billNumber, state, questionGeneralAssemblies),
     },
   });
   if (searchResult.success && searchResult.liveData) {

@@ -11,7 +11,6 @@ import { resolveFollowupTopic } from "@/lib/intelligence/conversation-manager";
 import { CRITICISM_GUIDANCE, detectCriticism } from "@/lib/intelligence/criticism";
 import { isFastPathMessage, isSystemTestMessage, SYSTEM_TEST_GUIDANCE } from "@/lib/intelligence/fast-path";
 import {
-  detectState,
   hasLocalPlaceHint,
   JURISDICTION_CLARIFICATION_MESSAGE,
   LOCAL_JURISDICTION_CLARIFICATION_MESSAGE,
@@ -869,11 +868,18 @@ async function routeMessage(
 
   const politicalIntents = classifyPoliticalIntents(text);
 
-  // A bare state-shaped bill number ("HB 312") with no state named is
+  // A bare state-shaped bill number ("HB 312") with no state named and no
+  // other state-jurisdiction signal (an HB/SB number, which is never
+  // federal notation, or an explicit General Assembly session) is
   // genuinely ambiguous -- every state numbers its bills starting from 1.
   // Ask rather than silently defaulting to federal (detectJurisdiction's
-  // default), matching this project's anti-fabrication discipline.
-  if (politicalIntents.has("state_legislation") && !detectState(text)) {
+  // default), matching this project's anti-fabrication discipline. Defers
+  // to resolveJurisdictionAndState (not a separate detectState check) so
+  // this gate never drifts out of sync with the resolver's own signals --
+  // confirmed live gap: "What happened to HB4809 in the 103rd General
+  // Assembly?" and "What is the current status of HB4809?" both name no
+  // state, but resolveJurisdictionAndState now resolves both to Illinois.
+  if (politicalIntents.has("state_legislation") && !resolveJurisdictionAndState(text, politicalIntents).state) {
     return {
       category: "state_legislation",
       label: POLITICAL_CATEGORY_LABELS.state_legislation,

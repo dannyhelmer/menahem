@@ -35,12 +35,38 @@ export function currentIllinoisGeneralAssembly(date: Date = new Date()): number 
 // the authoritative record rather than inferring it from a URL parameter
 // (ILGA's GAID query param does encode this too, but requires an external,
 // unverified GAID-to-GA-number mapping this project has no confirmed
-// source for; the page's own stated session text does not).
-const GENERAL_ASSEMBLY_RE = /\b(\d+)(?:st|nd|rd|th)\s+General\s+Assembly\b/i;
+// source for; the page's own stated session text does not). Matches the
+// plural "Assemblies" too -- a question naming two sessions in one breath
+// ("the 103rd and 104th General Assemblies") uses the shared plural noun,
+// not "Assembly" twice, so a singular-only pattern would silently miss it.
+const GENERAL_ASSEMBLY_ANCHOR_RE = /General\s+Assembl(?:y|ies)\b/gi;
+const ORDINAL_RE = /\b(\d+)(?:st|nd|rd|th)\b/g;
+// How far back from the "General Assembly(ies)" anchor to look for ordinal
+// numbers -- covers "the 103rd and 104th General Assemblies" (list of
+// ordinals sharing one trailing noun) as well as the simple "104th General
+// Assembly" case, without matching an unrelated ordinal earlier in a long
+// sentence.
+const ORDINAL_LOOKBACK_CHARS = 40;
+
+// Every GA session number mentioned in the text, deduplicated and sorted
+// ascending -- e.g. "Compare HB4809 in the 103rd and 104th General
+// Assemblies" yields [103, 104]. Used where a question may legitimately
+// name more than one session (a cross-session comparison), not just one.
+export function extractAllGeneralAssemblies(text: string): number[] {
+  const found = new Set<number>();
+  for (const anchor of text.matchAll(GENERAL_ASSEMBLY_ANCHOR_RE)) {
+    const windowStart = Math.max(0, anchor.index - ORDINAL_LOOKBACK_CHARS);
+    const window = text.slice(windowStart, anchor.index);
+    for (const ordinal of window.matchAll(ORDINAL_RE)) {
+      found.add(Number.parseInt(ordinal[1], 10));
+    }
+  }
+  return Array.from(found).sort((a, b) => a - b);
+}
 
 export function extractGeneralAssembly(text: string): number | null {
-  const match = text.match(GENERAL_ASSEMBLY_RE);
-  return match ? Number.parseInt(match[1], 10) : null;
+  const all = extractAllGeneralAssemblies(text);
+  return all.length > 0 ? all[0] : null;
 }
 
 // The actual collision-rejection decision: true only on an ACTIVE

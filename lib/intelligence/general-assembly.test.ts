@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { currentIllinoisGeneralAssembly, extractGeneralAssembly, isGeneralAssemblyMismatch } from "./general-assembly";
+import { currentIllinoisGeneralAssembly, extractAllGeneralAssemblies, extractGeneralAssembly, isGeneralAssemblyMismatch } from "./general-assembly";
 
 describe("currentIllinoisGeneralAssembly", () => {
   it("computes the confirmed live values -- 2024 is the 103rd GA, 2026 is the 104th", () => {
@@ -30,6 +30,34 @@ describe("extractGeneralAssembly", () => {
   it("returns null when no General Assembly is mentioned", () => {
     expect(extractGeneralAssembly("Illinois General Assembly - Bill Status of HB4809")).toBeNull();
     expect(extractGeneralAssembly("")).toBeNull();
+  });
+
+  it("matches the plural 'General Assemblies' too, not just singular 'Assembly'", () => {
+    // Confirmed gap: a question comparing two sessions in one breath uses
+    // the shared plural noun ("the 103rd and 104th General Assemblies"),
+    // not "General Assembly" twice -- the original singular-only pattern
+    // matched neither ordinal in that phrasing.
+    expect(extractGeneralAssembly("What changed between the 103rd and 104th General Assemblies?")).toBe(103);
+  });
+});
+
+describe("extractAllGeneralAssemblies", () => {
+  it("extracts every session number sharing one plural 'General Assemblies' noun", () => {
+    expect(extractAllGeneralAssemblies("Compare HB4809 in the 103rd and 104th General Assemblies.")).toEqual([103, 104]);
+  });
+
+  it("extracts a single session for the singular 'General Assembly' phrasing", () => {
+    expect(extractAllGeneralAssemblies("What happened to HB4809 in the 103rd General Assembly?")).toEqual([103]);
+  });
+
+  it("deduplicates and sorts ascending across multiple mentions in any order", () => {
+    expect(extractAllGeneralAssemblies("The 104th General Assembly revisited a bill from the 103rd General Assembly.")).toEqual([
+      103, 104,
+    ]);
+  });
+
+  it("returns an empty array when no session is mentioned", () => {
+    expect(extractAllGeneralAssemblies("What is the current status of HB4809?")).toEqual([]);
   });
 });
 

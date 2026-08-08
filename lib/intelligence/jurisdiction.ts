@@ -1,6 +1,8 @@
 // Ported from the Python app's tools/political_research: which level of
 // government a question is actually about, and which state if any.
 import { STATE_NAME_TO_CODE } from "@/lib/data/us-states";
+import { extractBillNumber } from "@/lib/intelligence/bill-number";
+import { extractGeneralAssembly } from "@/lib/intelligence/general-assembly";
 import type { PoliticalIntent } from "@/lib/intelligence/political-intent";
 
 export type Jurisdiction = "federal" | "state" | "local";
@@ -62,6 +64,18 @@ const STATE_BRANCH_NOUN_RE =
 // risk STATE_BRANCH_NOUN_RE already guards against.
 const COMPARISON_HINT_RE = /\bcompar\w+\b|\bversus\b|\bvs\.?\b/i;
 
+// An HB/SB-notation bill number is never federal -- federal bills are
+// always "H.R."/"S. <n>" (see bill-number.ts's normalizePrefix), never
+// "HB"/"SB". Combined with the fact that this app's only
+// jurisdiction-clarification choice is "Illinois or Federal"
+// (JURISDICTION_CLARIFICATION_MESSAGE below), a bare HB/SB number leaves
+// Illinois as the only remaining option -- there is no real ambiguity left
+// to ask about, even with no state named anywhere in the text.
+function isStateOnlyBillFormat(text: string): boolean {
+  const billId = extractBillNumber(text);
+  return billId !== null && (billId.startsWith("HB") || billId.startsWith("SB"));
+}
+
 // Combines jurisdiction/state detection with an override: a state bill or
 // state-branch noun mentioned without an obvious "state ___" phrase
 // (detectJurisdiction alone would call it "federal") but that DOES name a
@@ -93,6 +107,18 @@ export function resolveJurisdictionAndState(
         (intents.has("federal_legislation") && COMPARISON_HINT_RE.test(text)))
     ) {
       return { jurisdiction: "state", state };
+    }
+    // Confirmed live gap: "What happened to HB4809 in the 103rd General
+    // Assembly?" and "What is the current status of HB4809?" both name no
+    // state at all, so the branch above never fires and the caller (the
+    // clarification gate in app/api/chat/route.ts) fell through to asking
+    // the user to disambiguate Illinois vs. federal -- a choice that was
+    // never actually open, since HB/SB notation structurally rules out
+    // federal (isStateOnlyBillFormat) and "General Assembly" is state-only
+    // terminology Congress never uses (extractGeneralAssembly). Either
+    // signal alone is enough to resolve Illinois without asking.
+    if (!state && (isStateOnlyBillFormat(text) || extractGeneralAssembly(text) !== null)) {
+      return { jurisdiction: "state", state: "Illinois" };
     }
   }
   return { jurisdiction, state: jurisdiction === "federal" ? null : detectState(text) };
