@@ -13,7 +13,8 @@
 // them via broad search.
 import { getProvider } from "@/lib/ai/get-provider";
 import type { Jurisdiction } from "@/lib/intelligence/jurisdiction";
-import type { JurisdictionScope } from "@/lib/search/source-router";
+import { runSearchForMessage, type SearchOutcome } from "@/lib/search/orchestrate";
+import { STATE_OFFICIAL_DOMAINS, type JurisdictionScope } from "@/lib/search/source-router";
 import { MAX_RESEARCH_TASKS } from "./planner";
 
 export type ResearchEntityType = "bill" | "statute" | "court_case" | "agency_guidance" | "regulation" | "budget" | "other";
@@ -26,6 +27,14 @@ export interface ResearchPlanEntity {
   // its own.
   name: string;
   jurisdiction: string | null;
+  // 0-100: how certain the model is that this is the CORRECT, EXACT,
+  // dedicated entity for the specific subject requested -- not merely that
+  // a law with this name exists. Confirmed gap: the model would name a
+  // well-known but topically BROADER law (e.g. California's CCPA) in place
+  // of a state's actual dedicated statute on a narrower requested subject
+  // (e.g. data broker regulation specifically) -- this score is what lets
+  // that substitution be caught and verified instead of silently trusted.
+  confidence: number;
 }
 
 export interface ResearchPlan {
@@ -78,13 +87,24 @@ function buildPrompt(question: string): string {
     "5. REASONING: one or two sentences explaining your interpretation.\n" +
     "6. ENTITIES: the SPECIFIC real, named things (laws, bills, cases, regulations, agencies) this question " +
     "needs information about. If the question already names them explicitly, list exactly those -- do not add " +
-    "more. If the question describes a category or comparison WITHOUT naming specific entities (e.g. \"the five " +
-    "strongest state consumer privacy laws\"), use your own knowledge to name the most likely REAL, well-known " +
-    "entities that satisfy the request -- for example, for state consumer privacy laws: California's CCPA/CPRA, " +
-    "Virginia's VCDPA, Colorado's Privacy Act, Connecticut's CTDPA, Utah's UCPA. Only list an entity you are " +
-    "reasonably confident actually exists -- if you cannot confidently name real entities, leave this section " +
-    "empty rather than inventing plausible-sounding ones. If the question is about a single topic with no " +
-    "natural list of distinct entities, list zero or one.\n\n" +
+    "more. If the question describes a category or comparison WITHOUT naming specific entities, first identify " +
+    "the EXACT legal subject being asked about, not just its general topic area -- a request about \"data " +
+    "broker regulation\" is asking about a narrower, distinct subject than \"consumer privacy\" in general, " +
+    "even though the two overlap and a state's general privacy law may briefly touch on data brokers too. For " +
+    "each candidate entity, explicitly judge whether it is a DEDICATED, PRIMARY law on the exact subject " +
+    "requested, or a BROADER or ADJACENT law that merely has a section touching on it -- prefer the former, " +
+    "and never substitute the latter for it. Prominence or fame is NOT a selection criterion: a state's more " +
+    "famous general-purpose law is not a valid substitute for its specific dedicated statute on the requested " +
+    "subject, even when you are more confident the famous one exists. If you cannot confidently name the " +
+    "dedicated statute for a given jurisdiction, either include it with a low CONFIDENCE score (below) rather " +
+    "than silently upgrading to that jurisdiction's more famous adjacent law, or omit that jurisdiction " +
+    "entirely. Only list an entity you are reasonably confident actually exists -- if you cannot confidently " +
+    "name real entities, leave this section empty rather than inventing plausible-sounding ones. If the " +
+    "question is about a single topic with no natural list of distinct entities, list zero or one.\n" +
+    "7. For each entity, also give a CONFIDENCE score from 0 to 100: how certain you are that this is the " +
+    "CORRECT, EXACT, dedicated entity for the specific subject requested -- not merely that a law with this " +
+    "name exists. A well-known but topically broader substitute must score LOW, even if you are fully " +
+    "confident that law itself is real -- confidence measures precision to the request, not existence.\n\n" +
     "Reply in EXACTLY this format, nothing else:\n" +
     "TOPIC: ...\n" +
     "JURISDICTION: ...\n" +
@@ -92,8 +112,8 @@ function buildPrompt(question: string): string {
     "REQUEST_TYPE: ...\n" +
     "REASONING: ...\n" +
     "ENTITIES:\n" +
-    "- <entity name> | <jurisdiction, or \"federal\" if none>\n" +
-    "- <entity name> | <jurisdiction, or \"federal\" if none>\n\n" +
+    "- <entity name> | <jurisdiction, or \"federal\" if none> | <confidence 0-100>\n" +
+    "- <entity name> | <jurisdiction, or \"federal\" if none> | <confidence 0-100>\n\n" +
     `Question: ${question}`
   );
 }
@@ -111,10 +131,16 @@ function parseEntities(raw: string): ResearchPlanEntity[] {
   for (const line of sectionMatch[1].split("\n")) {
     const bulletMatch = line.match(/^\s*[-*]\s*(.+)$/);
     if (!bulletMatch) continue;
-    const [namePart, jurisdictionPart] = bulletMatch[1].split("|").map((s) => s.trim());
+    const [namePart, jurisdictionPart, confidencePart] = bulletMatch[1].split("|").map((s) => s.trim());
     if (!namePart) continue;
     const jurisdiction = !jurisdictionPart || /^federal$/i.test(jurisdictionPart) ? null : jurisdictionPart;
-    entities.push({ name: namePart, jurisdiction });
+    // Missing/unparseable confidence defaults to 50 (mid-value, triggers
+    // verification) rather than discarding the entity -- matches this
+    // file's existing "degrade gracefully, don't fail the whole thing"
+    // convention for a model that didn't follow the format exactly.
+    const parsedConfidence = confidencePart ? Number.parseInt(confidencePart, 10) : NaN;
+    const confidence = Number.isFinite(parsedConfidence) ? Math.min(100, Math.max(0, parsedConfidence)) : 50;
+    entities.push({ name: namePart, jurisdiction, confidence });
   }
   return entities.slice(0, MAX_RESEARCH_TASKS);
 }
@@ -149,6 +175,101 @@ export function parseResearchPlan(raw: string, question: string, fallback: PlanF
   return { topic, jurisdiction, entityType, requestType, reasoning, entities };
 }
 
+// Entities the model itself flagged as uncertain (see the CONFIDENCE
+// instruction in buildPrompt) get ONE targeted search before they're
+// trusted -- confirmed live: a low-confidence entity is exactly where the
+// model tends to substitute a well-known adjacent law for the dedicated
+// statute it isn't sure of, so this is the highest-value place to check.
+const ENTITY_VERIFICATION_CONFIDENCE_THRESHOLD = 70;
+
+// Words that don't distinguish this entity from any other law -- checking
+// for their presence in a search result would "confirm" almost anything.
+const ENTITY_NAME_STOPWORDS = new Set([
+  "the", "of", "and", "or", "for", "a", "an", "act", "acts", "law", "laws",
+  "regulation", "regulations", "statute", "statutes", "bill", "bills", "code",
+]);
+
+// The words that actually distinguish this entity's name from a generic
+// law in the same jurisdiction -- e.g. "data", "broker", "delete", "ccpa"
+// for "California Consumer Privacy Act (CCPA)", not "california" (the
+// jurisdiction, checked separately downstream) or "act" (true of every
+// statute). Used to check whether a search result is actually ABOUT this
+// specific entity, not just about the same state in general.
+function distinctiveWords(entityName: string, jurisdiction: string | null): string[] {
+  const jurisdictionWords = new Set((jurisdiction ?? "").toLowerCase().split(/\s+/));
+  return entityName
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !ENTITY_NAME_STOPWORDS.has(w) && !jurisdictionWords.has(w));
+}
+
+function isConfirmedByResults(words: string[], sources: SearchOutcome["sources"]): boolean {
+  if (!sources || sources.length === 0 || words.length === 0) return false;
+  return sources.some((s) => {
+    const haystack = `${s.title} ${s.url}`.toLowerCase();
+    return words.some((w) => haystack.includes(w));
+  });
+}
+
+function domainsForState(state: string): string[] {
+  const entry = STATE_OFFICIAL_DOMAINS[state];
+  if (!entry) return [];
+  const legislature = Array.isArray(entry.legislature) ? entry.legislature : entry.legislature ? [entry.legislature] : [];
+  return [...legislature, ...(entry.agency ? [entry.agency] : [])];
+}
+
+// Injectable purely for testing -- the real default is the actual search
+// layer, but this lets verifyLowConfidenceEntities' branching (confirmed /
+// dropped / kept-on-error) be tested without a real network call.
+type SearchFn = (query: string, maxResults: number, options?: { includeDomains?: string[] }) => Promise<SearchOutcome>;
+
+async function verifyEntity(
+  entity: ResearchPlanEntity,
+  searchFn: SearchFn,
+): Promise<{ keep: boolean; outcome: string }> {
+  const words = distinctiveWords(entity.name, entity.jurisdiction);
+  const includeDomains = entity.jurisdiction ? domainsForState(entity.jurisdiction) : [];
+
+  try {
+    const result = await searchFn(entity.name, 3, includeDomains.length > 0 ? { includeDomains } : undefined);
+    const confirmed = isConfirmedByResults(words, result.sources);
+    return { keep: confirmed, outcome: confirmed ? "confirmed" : "no confirming source found -- dropping" };
+  } catch (err) {
+    // A failed check means "unknown," not "disproven" -- dropping here
+    // would penalize the entity for an infrastructure failure that has
+    // nothing to do with whether it's actually correct.
+    return { keep: true, outcome: `verification check failed (${err instanceof Error ? err.message : "error"}) -- keeping, unknown not disproven` };
+  }
+}
+
+// Runs all verifications in parallel (one extra round-trip's worth of
+// latency total, not one per low-confidence entity) and returns the
+// original entity list with any unconfirmed ones removed. Entities at or
+// above the confidence threshold are returned untouched, unverified --
+// this is a targeted check for the model's OWN flagged uncertainty, not a
+// blanket re-verification of everything.
+export async function verifyLowConfidenceEntities(
+  entities: ResearchPlanEntity[],
+  searchFn: SearchFn = runSearchForMessage,
+): Promise<ResearchPlanEntity[]> {
+  const lowConfidence = entities.filter((e) => e.confidence < ENTITY_VERIFICATION_CONFIDENCE_THRESHOLD);
+  if (lowConfidence.length === 0) return entities;
+
+  const results = await Promise.allSettled(lowConfidence.map((e) => verifyEntity(e, searchFn)));
+  const dropped = new Set<ResearchPlanEntity>();
+  results.forEach((r, i) => {
+    const entity = lowConfidence[i];
+    if (r.status === "fulfilled") {
+      console.log(`[research-plan] verification for "${entity.name}" (confidence ${entity.confidence}): ${r.value.outcome}`);
+      if (!r.value.keep) dropped.add(entity);
+    } else {
+      console.warn(`[research-plan] verification threw for "${entity.name}":`, r.reason);
+    }
+  });
+  return entities.filter((e) => !dropped.has(e));
+}
+
 export async function planResearch(question: string, fallback: PlanFallback, userId?: string): Promise<ResearchPlan> {
   const provider = await getProvider(userId);
   if (!(await provider.isConfigured())) {
@@ -164,5 +285,7 @@ export async function planResearch(question: string, fallback: PlanFallback, use
     return fallbackPlan(question, fallback, "Planning request failed.");
   }
 
-  return parseResearchPlan(result, question, fallback);
+  const plan = parseResearchPlan(result, question, fallback);
+  const verifiedEntities = await verifyLowConfidenceEntities(plan.entities);
+  return { ...plan, entities: verifiedEntities };
 }

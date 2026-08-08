@@ -209,7 +209,7 @@ export function printResearchPlan(
     entityType: string;
     requestType: string;
     reasoning: string;
-    entities: { name: string; jurisdiction: string | null }[];
+    entities: { name: string; jurisdiction: string | null; confidence: number }[];
   },
 ): void {
   if (!shouldTrace()) return;

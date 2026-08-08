@@ -180,11 +180,16 @@ const SEARCH_TIMEOUT_MS = 26_000;
 // answer is never cut off by this.
 const FIRST_TOKEN_TIMEOUT_MS = 25_000;
 // The research-planning stage (see lib/research/research-plan.ts) is one
-// extra LLM round-trip before search even starts -- it must never be able
-// to hang the whole request. A failure/timeout here falls back to a
-// degenerate plan (zero entities), which every caller treats as "behave
-// exactly like today," so timing out is always safe, never a hard failure.
-const PLANNING_TIMEOUT_MS = 12_000;
+// extra LLM round-trip before search even starts, PLUS -- when the model
+// flags any entity as low-confidence -- one parallel round of verification
+// searches before returning. That's still just one extra round-trip's
+// worth of wall-clock latency (all low-confidence entities verify in
+// parallel), not one per entity, but it needs more headroom than the bare
+// LLM call alone did. It must never be able to hang the whole request. A
+// failure/timeout here falls back to a degenerate plan (zero entities),
+// which every caller treats as "behave exactly like today," so timing out
+// is always safe, never a hard failure.
+const PLANNING_TIMEOUT_MS = 20_000;
 
 class TimeoutError extends Error {}
 
