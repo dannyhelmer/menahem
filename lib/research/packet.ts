@@ -659,6 +659,42 @@ export async function buildResearchPacket(
       "source as if it were equivalent -- say so explicitly, using exactly this sentence right before you " +
       "present what secondary sources did find: \"No official legislative source could be located for this " +
       "information. The following secondary sources were used instead.\"",
+    // Unconditional (not gated behind LEGISLATIVE_SUMMARY_INTENTS below) --
+    // confirmed gap: this discipline only existed inside the gated block,
+    // which never activates for entity-driven multi-part research (the
+    // bill number only ever exists in the PLANNER's constructed per-task
+    // text, invisible to the regex that decides whether "this looks like a
+    // legislation question"). Confirmed live: Illinois HB4809 -- correctly
+    // identified as the dedicated data-broker bill, but introduced in 2026
+    // and referred to the House Rules Committee -- got described as an
+    // enacted "Illinois Data Broker Registration Law" with none of this
+    // discipline active at all. Separately confirmed: even WITH this
+    // discipline active, a secondary tracker's claim that a bill "became
+    // law" was enough on its own to state enactment as fact -- the
+    // official-source requirement below closes that gap specifically for
+    // enactment claims, not just sourcing generally.
+    "Whenever a bill, resolution, or other piece of legislation is described anywhere in this response -- not " +
+      "just in a dedicated bill-summary answer -- first determine its CURRENT STATUS from the official bill-" +
+      "status page or legislative record (the state legislature's own bill-tracking site, or Congress.gov " +
+      "federally) and classify it as exactly one of: ENACTED STATUTE or ENACTED PUBLIC ACT (signed into law and " +
+      "in force -- cite the resulting Public Act number or statutory citation whenever the record provides one), " +
+      "INTRODUCED (filed but not yet acted on), PENDING / REFERRED TO COMMITTEE (currently in committee or " +
+      "awaiting a vote -- name the committee if known), PASSED ONE CHAMBER (passed one chamber, pending in the " +
+      "other), FAILED (did not pass, or the session ended without action), WITHDRAWN (formally withdrawn by its " +
+      "sponsor), or RE-REFERRED (sent back to committee after an earlier stage). Never describe a bill as " +
+      "\"law,\" \"enacted,\" or \"in effect,\" and never describe its provisions with present-tense statements " +
+      "about what the jurisdiction currently does or requires (\"Illinois requires...\", \"the law provides...\") " +
+      "unless the OFFICIAL record specifically shows it was signed or enacted. A secondary source's claim that a " +
+      "bill \"became law\" or \"was enacted\" is NOT sufficient on its own to state enactment as fact, no matter " +
+      "how reputable that secondary source seems -- either that claim is corroborated by the official record, or " +
+      "it must be attributed and hedged as unconfirmed, exactly like any other secondary-sourced claim. For " +
+      "anything short of confirmed enactment, use exactly \"proposed legislation\" or \"pending bill\" as the " +
+      "status label, and describe its provisions with conditional language throughout -- \"HB4809 would " +
+      "require...\", \"the bill would establish...\" -- never the present tense a reader would mistake for a " +
+      "description of current law. This is a factual accuracy requirement, not a style preference: describing a " +
+      "pending bill's provisions as if they were already in force is exactly the kind of unverified claim " +
+      "presented as fact this project exists to prevent, and it must never happen regardless of how likely the " +
+      "bill seems to become law.",
   ];
   if (LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent))) {
     instructions.push(LEGISLATIVE_SUMMARY_INSTRUCTIONS);
