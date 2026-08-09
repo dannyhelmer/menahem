@@ -5,6 +5,7 @@ import type { GovDataProvider } from "@/lib/gov-data/types";
 import { getConnectedEntities } from "@/lib/graph/store";
 import { getTimeline } from "@/lib/timeline/store";
 import { runSearchWithRetry } from "@/lib/search/orchestrate";
+import { detectCanonicalTarget, type CanonicalTargetKind } from "@/lib/search/canonical-source";
 import {
   classifyJurisdictionRouting,
   isSpecificRoute,
@@ -608,16 +609,40 @@ export async function buildResearchPacket(
   // runs, the legislature's page may never have been in the fetched
   // candidate set at all.
   const isLegislative = LEGISLATIVE_SUMMARY_INTENTS.some((intent) => intents.has(intent));
-  const searchQuery = isLegislative ? `${question} official legislature bill text status` : question;
+  // Confirmed live: "What does the Illinois Constitution say about the
+  // governor's veto power?" isn't a LEGISLATIVE_SUMMARY_INTENTS question
+  // (no "constitution" intent exists), so the query went out unbiased --
+  // the actual Illinois Constitution page never even made it into the
+  // candidate pool, and orchestrate.ts's canonical-source ranking
+  // (lib/search/canonical-source.ts) has nothing to promote if the
+  // canonical document was never fetched in the first place. Detecting
+  // the SAME canonical target here and biasing the query toward it is the
+  // other half of that fix -- ranking can only reorder what retrieval
+  // actually returns.
+  const canonicalTarget = detectCanonicalTarget(question);
+  const canonicalQuerySuffix: Record<CanonicalTargetKind, string> = {
+    constitution: "official constitution full text article section",
+    statute: "official statute full text",
+    bill_text: "official bill full text",
+    bill_status: "official bill status",
+    court_opinion: "official court opinion full text",
+    agency_record: "official agency record",
+  };
+  const searchQuery = isLegislative
+    ? `${question} official legislature bill text status`
+    : canonicalTarget
+      ? `${question} ${canonicalQuerySuffix[canonicalTarget.kind]}`
+      : question;
+  const widenSearch = isLegislative || canonicalTarget !== null;
   const billNumber = extractBillNumber(question);
   const questionGeneralAssemblies = extractAllGeneralAssemblies(question);
-  // A wider raw candidate pool gives sortByAuthority (in orchestrate.ts,
-  // applied before the top MAX_PAGES_TO_FETCH are actually fetched) more to
-  // work with -- the official legislature's page is often organically
-  // outranked by implementation pages and explainers, so if only the
-  // default 10 raw results are requested, it may never be in the candidate
-  // set at all for the authority sort to promote.
-  const searchResult = await runSearchWithRetry(searchQuery, isLegislative ? Math.max(maxSearchResults, 15) : maxSearchResults, {
+  // A wider raw candidate pool gives the ranking in orchestrate.ts (applied
+  // before the top MAX_PAGES_TO_FETCH are actually fetched) more to work
+  // with -- the official/canonical page is often organically outranked by
+  // implementation pages and explainers, so if only the default 10 raw
+  // results are requested, it may never be in the candidate set at all for
+  // the ranking to promote.
+  const searchResult = await runSearchWithRetry(searchQuery, widenSearch ? Math.max(maxSearchResults, 15) : maxSearchResults, {
     preferRecent: detectRecencyNeed(question),
     // buildResearchPacket only runs for queries already classified as
     // government/political intents (see politicalIntents gating in
