@@ -73,6 +73,7 @@ import {
   type TieredSource,
 } from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
+import { enforceCanonicalDocumentCitation } from "@/lib/research/canonical-citation";
 import { enforceCaliforniaDataBrokerAttribution } from "@/lib/research/entity-attribution";
 import { planResearch } from "@/lib/research/research-plan";
 import { flagStaleFutureFraming } from "@/lib/research/temporal-framing";
@@ -1836,6 +1837,34 @@ export const POST = withAuth(async (request, _ctx, user) => {
             onStage(`⚠ Attached ${primarySourceCorrections.length} missing official citation${primarySourceCorrections.length === 1 ? "" : "s"}`);
           }
           assistantText = primarySourceCorrected;
+        }
+
+        // CANONICAL DOCUMENT CITATION: a distinct failure mode from the
+        // primary-source check above -- that one exists for "no official
+        // source was cited at all," which Public Act 104-0003 already
+        // satisfies on its own (it IS official). Confirmed live: "What
+        // does the Illinois Constitution say about the governor's veto
+        // power?" correctly discussed Article IV, Section 9 -- and the
+        // actual Constitution page WAS retrieved -- but the citation
+        // attached was "Illinois General Assembly - Public Act
+        // 104-0003" three times, never the Constitution itself. A
+        // citation attached to the wrong document isn't an unsupported
+        // claim needing a caveat; it's simply incorrect, so this replaces
+        // it with the actual canonical document's citation rather than
+        // just flagging it. See lib/research/canonical-citation.ts.
+        if (grounded) {
+          const { text: canonicalCitationCorrected, corrections: canonicalCitationCorrections } =
+            enforceCanonicalDocumentCitation(assistantText, resolvedUserText, (allSources ?? []) as TieredSource[]);
+          if (canonicalCitationCorrections.length > 0) {
+            console.warn(
+              `[canonical-citation] corrected wrong-document citation: ` +
+                canonicalCitationCorrections.map((c) => `"${c.section}" ${c.replacedUrl} -> ${c.canonicalUrl}`).join(", "),
+            );
+            onStage(
+              `⚠ Corrected ${canonicalCitationCorrections.length} citation${canonicalCitationCorrections.length === 1 ? "" : "s"} to the actual requested document`,
+            );
+          }
+          assistantText = canonicalCitationCorrected;
         }
 
         // TEMPORAL FRAMING CHECK: confirmed live -- a response describing

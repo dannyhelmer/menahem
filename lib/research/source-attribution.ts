@@ -232,7 +232,7 @@ export function enforcePrimarySourceCitation(
 // Deliberately leaves path/query untouched: over-normalizing (e.g. ignoring
 // query strings) risks a false negative where two genuinely different pages
 // on the same host get treated as the same citation.
-function normalizeUrlForComparison(url: string): string {
+export function normalizeUrlForComparison(url: string): string {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
