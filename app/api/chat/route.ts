@@ -65,7 +65,13 @@ import { buildComparisonPacket } from "@/lib/research/comparison-packet";
 import { runDeepResearch } from "@/lib/research/deep-research";
 import { buildFollowupSuggestions } from "@/lib/research/followups";
 import { enforceLegislativeStatusLanguage } from "@/lib/research/legislative-status";
-import { buildConfidenceReason, buildResearchPacket, computeConfidence, type TieredSource } from "@/lib/research/packet";
+import {
+  buildConfidenceReason,
+  buildResearchPacket,
+  computeConfidence,
+  DIRECT_RECORD_CLAIM_CATEGORIES,
+  type TieredSource,
+} from "@/lib/research/packet";
 import { buildPlannedResearchPacket, detectMultiPartResearchQuestion } from "@/lib/research/planner";
 import { enforceCaliforniaDataBrokerAttribution } from "@/lib/research/entity-attribution";
 import { planResearch } from "@/lib/research/research-plan";
@@ -1921,8 +1927,23 @@ export const POST = withAuth(async (request, _ctx, user) => {
         if (confidence) {
           const usedTiered = usedSources as TieredSource[];
           const directGovHit = usedTiered.some((s) => s.provenance === "always_keep" && s.tier === "government");
-          finalConfidence = computeConfidence(usedTiered, directGovHit);
-          finalConfidenceReason = buildConfidenceReason(finalConfidence, usedTiered, directGovHit);
+          // Confirmed gap: a single Illinois General Assembly bill-status
+          // page (the actual, definitive record of a bill's status)
+          // couldn't score above Medium on its own, since High required
+          // 2+ total sources regardless of how authoritative the one
+          // retrieved source was. Categories where an official source IS
+          // the definitive primary record for the claim (a bill/statute
+          // site's own status page or statutory text, a court's own
+          // opinion, an agency's own record) let a single such source
+          // reach High; everything else (budget/fiscal estimates, open-
+          // ended political discussion, comparisons, Deep Research's own
+          // synthesis) still needs real corroboration, matching how those
+          // claims actually work -- a single source rarely settles a
+          // policy judgment or an empirical estimate the way it settles
+          // "what does the official record say happened to this bill."
+          const claimType = DIRECT_RECORD_CLAIM_CATEGORIES.has(category) ? "direct_record" : "requires_corroboration";
+          finalConfidence = computeConfidence(usedTiered, directGovHit, claimType);
+          finalConfidenceReason = buildConfidenceReason(finalConfidence, usedTiered, directGovHit, claimType);
 
           // Paths with allowWholeResponseCitationRejection already replace
           // the ENTIRE response when an official source went uncited (see

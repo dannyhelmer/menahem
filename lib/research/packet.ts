@@ -396,28 +396,76 @@ export interface ResearchPacket {
   sections?: { key: string; sources: TieredSource[] }[];
 }
 
+// Whether the claim being scored is the kind a single authoritative
+// primary source can settle on its own, or the kind that genuinely needs
+// more than one source to be confident about. Confirmed gap: computeConfidence
+// used to require 2+ total sources for High no matter what, so a single
+// Illinois General Assembly bill-status page (the actual, definitive
+// record of a bill's status) could never score above Medium on its own --
+// treating "how many sources" as a proxy for "how well-established is
+// this claim" when for a DIRECT RECORD, one authoritative primary source
+// IS the definitive answer; a second source doesn't make an already-
+// definitive bill-status page, statutory text, court opinion, or agency
+// record more true. "requires_corroboration" is for the opposite case --
+// synthesis, interpretation, or empirical/policy claims (a fiscal
+// estimate, a projected impact, a general "is this working" assessment)
+// that a single source, even an official one, doesn't settle by itself --
+// there the older, stricter multiple-sources bar still applies.
+export type ClaimCorroborationLevel = "direct_record" | "requires_corroboration";
+
+// Categories where an official source IS the definitive primary record
+// for what it's being cited for -- matches the exact examples this
+// project treats as direct records: a bill/statute site's bill-status
+// page or statutory text, a court's own opinion, an agency's own record
+// of its actions. Deliberately excludes categories that are inherently
+// about synthesis or contested interpretation rather than a single
+// authoritative record (budget/fiscal estimates, open-ended political
+// discussion, comparisons, Deep Research's own multi-angle synthesis) --
+// those keep requiring real corroboration for a High rating. See
+// DIRECT_RECORD_CATEGORIES in app/api/chat/route.ts for how a response's
+// category maps to this.
+export const DIRECT_RECORD_CLAIM_CATEGORIES = new Set([
+  "state_legislation",
+  "federal_legislation",
+  "congress",
+  "regulations",
+  "supreme_court",
+  "state_courts",
+  "constitution",
+  "executive_branch",
+  "governor",
+  "local_government",
+  "campaign_finance",
+]);
+
 // Deterministic, mechanical explanation of a confidence rating -- source
-// counts and composition only, never an editorial claim about the topic
-// itself (that would require judgment this function doesn't have grounds
-// to make). Shared by the plain packet, Deep Research, and Comparison so
-// "why is this Medium?" always has a real, honest answer behind it.
-// Extracted so the same rule can be re-applied post-generation against a
-// filtered (actually-used) source set, not just the raw retrieval set --
-// see filterUsedSources in source-attribution.ts.
-// Confirmed gap: this used to return "high" whenever at least one
-// government-tier source was PRESENT alongside 2+ total sources -- a
-// response citing 1 official source and 4 secondary ones scored identically
-// to one citing 4 official and 1 secondary. A response based mostly on
-// secondary sources must not receive a High rating, so official sources now
-// have to make up at least HALF of what's actually cited (governmentRatio),
-// not merely appear at all. directGovHit (a structured gov-data-provider
-// hit, e.g. Congress.gov's own API) stays sufficient on its own -- it's
-// unambiguously primary by construction, no ratio needed.
-export function computeConfidence(sources: TieredSource[], directGovHit: boolean): ResearchPacket["confidence"] {
+// counts, composition, and claim type only, never an editorial claim about
+// the topic itself (that would require judgment this function doesn't have
+// grounds to make). Shared by the plain packet, Deep Research, and
+// Comparison so "why is this Medium?" always has a real, honest answer
+// behind it. Extracted so the same rule can be re-applied post-generation
+// against a filtered (actually-used) source set, not just the raw
+// retrieval set -- see filterUsedSources in source-attribution.ts.
+export function computeConfidence(
+  sources: TieredSource[],
+  directGovHit: boolean,
+  claimType: ClaimCorroborationLevel = "direct_record",
+): ResearchPacket["confidence"] {
   const governmentSourceCount = sources.filter((s) => s.tier === "government").length;
-  const governmentRatio = sources.length > 0 ? governmentSourceCount / sources.length : 0;
   if (directGovHit) return "high";
-  if (governmentSourceCount >= 1 && governmentRatio >= 0.5 && sources.length >= 2) return "high";
+
+  if (claimType === "direct_record") {
+    if (governmentSourceCount >= 1) return "high";
+  } else {
+    // requires_corroboration: a response based mostly on secondary sources
+    // must not receive a High rating, so official sources have to make up
+    // at least HALF of what's actually cited, not merely appear once
+    // alongside a pile of secondary ones -- and there must be more than
+    // one source total, since "corroboration" is meaningless with only one.
+    const governmentRatio = sources.length > 0 ? governmentSourceCount / sources.length : 0;
+    if (governmentSourceCount >= 1 && governmentRatio >= 0.5 && sources.length >= 2) return "high";
+  }
+
   if (sources.length >= 1) return "medium";
   return "low";
 }
@@ -426,6 +474,7 @@ export function buildConfidenceReason(
   confidence: ResearchPacket["confidence"],
   sources: TieredSource[],
   directGovHit: boolean,
+  claimType: ClaimCorroborationLevel = "direct_record",
 ): string {
   const counts: Record<SourceTier, number> = { government: 0, news: 0, reference: 0, general: 0 };
   for (const s of sources) counts[s.tier]++;
@@ -446,9 +495,12 @@ export function buildConfidenceReason(
   if (confidence === "medium") {
     return `${basis}\nAt least one source was found, but not enough official corroboration to rate this higher.`;
   }
-  return directGovHit
-    ? `${basis}\nRetrieved directly from an authoritative government data source.`
-    : `${basis}\nCorroborated by an official government source alongside others.`;
+  if (directGovHit) return `${basis}\nRetrieved directly from an authoritative government data source.`;
+  const governmentSourceCount = sources.filter((s) => s.tier === "government").length;
+  if (claimType === "direct_record" && governmentSourceCount === 1 && sources.length === 1) {
+    return `${basis}\nA single authoritative primary source directly establishes this.`;
+  }
+  return `${basis}\nCorroborated by an official government source alongside others.`;
 }
 
 function selectGovProviders(intents: Set<PoliticalIntent>, routing: JurisdictionRouting): GovDataProvider[] {
