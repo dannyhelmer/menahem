@@ -1,3 +1,4 @@
+import { CANONICAL_STRICT_RELEVANCE_RATIO, detectCanonicalTarget, matchesCanonicalTarget } from "./canonical-source";
 import { fetchPageText } from "./fetch";
 import { getConfiguredProviders } from "./registry";
 import { stateForDomain } from "./source-router";
@@ -185,8 +186,30 @@ export function rankingScore(relevance: RelevanceScore, authorityRank: number): 
 // used, just computed from the now-cleaned term set. This is what makes
 // the confirmed contamination cases (matched ONLY on the state name or
 // "entity") get rejected outright now, not merely ranked lower.
-export function passesRelevanceGate(terms: string[], relevance: RelevanceScore): boolean {
-  return terms.length === 0 || relevance.matchedTerms.length > 0;
+//
+// Confirmed live gap: this one-term bar is what let a constitutional-
+// amendment proposal, a glossary page, and an unrelated bill/statute
+// through for "What does the Illinois Constitution say about the
+// governor's veto power?" -- each shared exactly one incidental word
+// ("constitution," "veto," or the state's own name) with the question.
+// When a canonical target has been identified (see lib/search/
+// canonical-source.ts) and this specific candidate ISN'T a match for it,
+// a single shared word is no longer enough -- it needs real topical
+// overlap (a majority of the question's significant terms), the same bar
+// a genuinely substantive secondary source can still clear on its own
+// merits. A candidate that IS the canonical match always passes
+// regardless of its raw ratio, since canonicalRankBonus already sorts it
+// to the top separately.
+export function passesRelevanceGate(
+  terms: string[],
+  relevance: RelevanceScore,
+  canonicalContext?: { hasCanonicalTarget: boolean; isCanonicalMatch: boolean },
+): boolean {
+  if (terms.length === 0) return true;
+  if (canonicalContext?.hasCanonicalTarget && !canonicalContext.isCanonicalMatch) {
+    return relevance.ratio >= CANONICAL_STRICT_RELEVANCE_RATIO;
+  }
+  return relevance.matchedTerms.length > 0;
 }
 
 function hostnameOf(url: string): string | null {
@@ -402,18 +425,26 @@ export async function runSearchForMessage(
   const significantTerms = options?.taskContext?.taskQuestion
     ? computeSignificantTerms(options.taskContext.taskQuestion, taskState)
     : [];
+  // Canonical-source preference: when the question names a specific
+  // primary document/record (the Constitution, a statute citation, a bill
+  // number, a case name, a named agency's action), identify it up front so
+  // an actual match can be prioritized over pages that merely share a
+  // topical word with it -- see lib/search/canonical-source.ts.
+  const canonicalTarget = options?.taskContext?.taskQuestion ? detectCanonicalTarget(options.taskContext.taskQuestion) : null;
   const scored = results.map((r) => ({
     result: r,
     relevance: scoreRelevance(significantTerms, r.title, r.snippet),
+    isCanonicalMatch: canonicalTarget ? matchesCanonicalTarget(canonicalTarget, r.url, r.title, r.snippet) : false,
   }));
-  const filtered = scored.filter(({ result: r, relevance }) => {
+  const filtered = scored.filter(({ result: r, relevance, isCanonicalMatch }) => {
     if (isSocialMediaUrl(r.url)) return false;
     const host = hostnameOf(r.url);
     if (taskState && host) {
       const domainState = stateForDomain(host);
       if (domainState && domainState !== taskState) return false;
     }
-    if (!passesRelevanceGate(significantTerms, relevance)) return false;
+    if (!passesRelevanceGate(significantTerms, relevance, { hasCanonicalTarget: canonicalTarget !== null, isCanonicalMatch }))
+      return false;
     return true;
   });
   const filteredResults = new Set(filtered.map((f) => f.result));
@@ -429,15 +460,25 @@ export async function runSearchForMessage(
     recordFiltered(options?.diagnostics, diagPhase, r.url, r.title, reason);
   }
 
-  // Sort by the combined relevance+authority score before deciding which
-  // pages are actually worth fetching -- otherwise a genuinely relevant
-  // source that happened to rank lower in raw provider order never gets a
-  // chance at all once the list is sliced down to MAX_PAGES_TO_FETCH.
-  const ranked = filtered.sort(
-    (a, b) =>
+  // Sort by canonical match FIRST -- a candidate that IS the specific
+  // document the question asked about always outranks one that merely
+  // shares its topic, regardless of the latter's own domain authority or
+  // keyword overlap (see canonicalRankBonus's doc comment: this is a
+  // separate, dominant comparator key, not blended numerically into the
+  // relevance score, precisely so it can never be outweighed by an
+  // authority difference). Ties within each group (both canonical
+  // matches, or neither) fall through to the existing combined relevance
+  // +authority score, otherwise a genuinely relevant source that happened
+  // to rank lower in raw provider order never gets a chance at all once
+  // the list is sliced down to MAX_PAGES_TO_FETCH.
+  const ranked = filtered.sort((a, b) => {
+    const canonicalDiff = (b.isCanonicalMatch ? 1 : 0) - (a.isCanonicalMatch ? 1 : 0);
+    if (canonicalDiff !== 0) return canonicalDiff;
+    return (
       rankingScore(b.relevance, sourceAuthorityRank(b.result.url, b.result.title)) -
-      rankingScore(a.relevance, sourceAuthorityRank(a.result.url, a.result.title)),
-  );
+      rankingScore(a.relevance, sourceAuthorityRank(a.result.url, a.result.title))
+    );
+  });
   const candidates = ranked.slice(0, MAX_PAGES_TO_FETCH).map((s) => s.result);
   for (const s of ranked.slice(MAX_PAGES_TO_FETCH)) {
     recordFiltered(options?.diagnostics, diagPhase, s.result.url, s.result.title, "beyond_fetch_limit");
@@ -503,7 +544,13 @@ export async function runSearchForMessage(
   const expectedGeneralAssembly = options?.taskContext?.expectedGeneralAssembly ?? null;
   const rejectedUrls = new Set<string>();
   const fetched = rawFetched.filter((f) => {
-    if (!passesRelevanceGate(significantTerms, scoreRelevance(significantTerms, f.title, f.text))) {
+    const isCanonicalMatch = canonicalTarget ? matchesCanonicalTarget(canonicalTarget, f.url, f.title, f.text) : false;
+    if (
+      !passesRelevanceGate(significantTerms, scoreRelevance(significantTerms, f.title, f.text), {
+        hasCanonicalTarget: canonicalTarget !== null,
+        isCanonicalMatch,
+      })
+    ) {
       recordFiltered(options?.diagnostics, diagPhase, f.url, f.title, "not_topically_relevant_fetched");
       rejectedUrls.add(f.url);
       return false;

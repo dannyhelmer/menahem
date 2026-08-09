@@ -65,6 +65,54 @@ describe("scoreRelevance / passesRelevanceGate -- the confirmed Nevada/Massachus
   });
 });
 
+describe("passesRelevanceGate -- canonical-aware mode (the confirmed Illinois Constitution veto-power case)", () => {
+  const question = "What does the Illinois Constitution say about the governor's veto power?";
+  const terms = computeSignificantTerms(question, "Illinois");
+
+  it("still passes the actual canonical match even with a low raw relevance ratio", () => {
+    // The canonical match itself might only share one or two of the
+    // question's significant terms in its title/snippet (the rest is in
+    // the body once fetched) -- being the actual document is sufficient
+    // on its own, it doesn't also need to clear the stricter ratio.
+    const relevance = scoreRelevance(terms, "Illinois Constitution", "");
+    expect(passesRelevanceGate(terms, relevance, { hasCanonicalTarget: true, isCanonicalMatch: true })).toBe(true);
+  });
+
+  it("rejects a constitutional-amendment proposal that shares only one incidental word -- the confirmed contamination case", () => {
+    const relevance = scoreRelevance(terms, "Proposed Amendment on Legislative Veto Procedures", "");
+    // Shares only "veto" (1 of 4 significant terms, ratio 0.25) -- a
+    // proposal to change veto procedure, not the actual constitutional
+    // text, and not the canonical match either.
+    expect(relevance.ratio).toBeLessThan(0.5);
+    expect(passesRelevanceGate(terms, relevance, { hasCanonicalTarget: true, isCanonicalMatch: false })).toBe(false);
+  });
+
+  it("rejects an unrelated bill that shares zero terms, same as the non-canonical-aware gate already would", () => {
+    const relevance = scoreRelevance(terms, "Bill Status of HB4809 - Data Broker Registration", "");
+    expect(passesRelevanceGate(terms, relevance, { hasCanonicalTarget: true, isCanonicalMatch: false })).toBe(false);
+  });
+
+  it("still accepts a genuinely substantive secondary source that clears the stricter ratio on its own merits", () => {
+    // A law review article or news analysis actually discussing the
+    // governor's veto power in real depth (not just a passing mention)
+    // should still qualify, even though it isn't the canonical document
+    // itself -- the stricter bar is about incidental overlap, not about
+    // excluding every non-primary source outright.
+    const relevance = scoreRelevance(terms, "Understanding the Illinois Governor's Constitutional Veto Power", "veto override power constitution");
+    expect(relevance.ratio).toBeGreaterThanOrEqual(0.5);
+    expect(passesRelevanceGate(terms, relevance, { hasCanonicalTarget: true, isCanonicalMatch: false })).toBe(true);
+  });
+
+  it("falls back to the original lenient one-term bar when there is no canonical target at all", () => {
+    const relevance = scoreRelevance(terms, "Illinois Governor's Office Overview", "");
+    // Matches only "governor" -- would fail the stricter 0.5 ratio, but
+    // there's no canonical target here, so the original behavior applies.
+    expect(passesRelevanceGate(terms, relevance, { hasCanonicalTarget: false, isCanonicalMatch: false })).toBe(
+      relevance.matchedTerms.length > 0,
+    );
+  });
+});
+
 describe("rankingScore -- relevance is primary, authority only a tiebreaker", () => {
   it("ranks a highly relevant official page above an unrelated official page with HIGHER authority", () => {
     // The exact confirmed scenario: an on-topic page at a lower authority
