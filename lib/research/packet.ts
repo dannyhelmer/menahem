@@ -620,13 +620,18 @@ export async function buildResearchPacket(
   // other half of that fix -- ranking can only reorder what retrieval
   // actually returns.
   const canonicalTarget = detectCanonicalTarget(question);
+  // Deliberately short and minimal, not a long generic phrase -- a
+  // multi-word suffix like "official full text article section" dilutes
+  // the question's own distinctive terms (e.g. "veto," "governor," which
+  // are what actually distinguish the RIGHT constitutional article from
+  // the other dozen or so on the same site) rather than helping find them.
   const canonicalQuerySuffix: Record<CanonicalTargetKind, string> = {
-    constitution: "official constitution full text article section",
-    statute: "official statute full text",
-    bill_text: "official bill full text",
+    constitution: "official text",
+    statute: "official text",
+    bill_text: "official full text",
     bill_status: "official bill status",
-    court_opinion: "official court opinion full text",
-    agency_record: "official agency record",
+    court_opinion: "official opinion",
+    agency_record: "official record",
   };
   const searchQuery = isLegislative
     ? `${question} official legislature bill text status`
@@ -634,6 +639,12 @@ export async function buildResearchPacket(
       ? `${question} ${canonicalQuerySuffix[canonicalTarget.kind]}`
       : question;
   const widenSearch = isLegislative || canonicalTarget !== null;
+  // A multi-article/multi-section document (the Constitution, a lengthy
+  // statute) needs a wider net than a single bill does -- there are a
+  // dozen-plus candidate pages on the SAME official site, and the right
+  // one has to actually be among whatever gets fetched for the ranking to
+  // have a chance at promoting it.
+  const canonicalNeedsWiderNet = canonicalTarget?.kind === "constitution" || canonicalTarget?.kind === "statute";
   const billNumber = extractBillNumber(question);
   const questionGeneralAssemblies = extractAllGeneralAssemblies(question);
   // A wider raw candidate pool gives the ranking in orchestrate.ts (applied
@@ -642,7 +653,8 @@ export async function buildResearchPacket(
   // implementation pages and explainers, so if only the default 10 raw
   // results are requested, it may never be in the candidate set at all for
   // the ranking to promote.
-  const searchResult = await runSearchWithRetry(searchQuery, widenSearch ? Math.max(maxSearchResults, 15) : maxSearchResults, {
+  const widenedResultCount = canonicalNeedsWiderNet ? 20 : 15;
+  const searchResult = await runSearchWithRetry(searchQuery, widenSearch ? Math.max(maxSearchResults, widenedResultCount) : maxSearchResults, {
     preferRecent: detectRecencyNeed(question),
     // buildResearchPacket only runs for queries already classified as
     // government/political intents (see politicalIntents gating in
