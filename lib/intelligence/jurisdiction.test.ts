@@ -127,4 +127,24 @@ describe("resolveJurisdictionAndState -- Illinois HB/SB and General Assembly ses
     const result = resolveJurisdictionAndState("What bills passed the 104th General Assembly?", intentSet());
     expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
   });
+
+  // Confirmed live gap (round 2): once classifyPoliticalIntents was fixed
+  // to recognize a bare ILCS citation as state_legislation, "What does 740
+  // ILCS 14 require of private entities collecting biometric data?" fell
+  // straight into this SAME "Illinois or Federal?" clarification -- "ILCS"
+  // is exactly as state-specific as HB/SB notation (never used for a
+  // federal statute or any other state's code), so it already answers the
+  // question.
+  it("resolves Illinois for a bare ILCS citation with no state named", () => {
+    const result = resolveJurisdictionAndState(
+      "What does 740 ILCS 14 require of private entities collecting biometric data?",
+      intentSet("state_legislation"),
+    );
+    expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
+  });
+
+  it("resolves Illinois for an ILCS citation with a section symbol", () => {
+    const result = resolveJurisdictionAndState("What does 815 ILCS § 505 prohibit?", intentSet("state_legislation"));
+    expect(result).toEqual({ jurisdiction: "state", state: "Illinois" });
+  });
 });

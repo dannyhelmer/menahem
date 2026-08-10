@@ -76,6 +76,17 @@ function isStateOnlyBillFormat(text: string): boolean {
   return billId !== null && (billId.startsWith("HB") || billId.startsWith("SB"));
 }
 
+// "ILCS" (Illinois Compiled Statutes) is exactly as state-specific as
+// HB/SB notation is -- it's never used for a federal statute (those cite
+// as "U.S.C." or "CFR") or any other state's code. Confirmed live: "What
+// does 740 ILCS 14 require of private entities collecting biometric
+// data?" names no state at all, so once classifyPoliticalIntents (fixed
+// separately) correctly recognized this as a state_legislation question,
+// it immediately fell into the SAME "Illinois or Federal?" clarification
+// the HB/SB fix above already covers -- but "ILCS" itself already answers
+// the question, the same way HB/SB notation does.
+const ILCS_CITATION_RE = /\b\d+\s*ILCS\b/i;
+
 // Combines jurisdiction/state detection with an override: a state bill or
 // state-branch noun mentioned without an obvious "state ___" phrase
 // (detectJurisdiction alone would call it "federal") but that DOES name a
@@ -117,7 +128,7 @@ export function resolveJurisdictionAndState(
     // federal (isStateOnlyBillFormat) and "General Assembly" is state-only
     // terminology Congress never uses (extractGeneralAssembly). Either
     // signal alone is enough to resolve Illinois without asking.
-    if (!state && (isStateOnlyBillFormat(text) || extractGeneralAssembly(text) !== null)) {
+    if (!state && (isStateOnlyBillFormat(text) || extractGeneralAssembly(text) !== null || ILCS_CITATION_RE.test(text))) {
       return { jurisdiction: "state", state: "Illinois" };
     }
   }
