@@ -226,6 +226,32 @@ export function sourceAuthorityRank(url: string, title = ""): number {
   return 10; // private websites / unclassified
 }
 
+// Shared de-duplication for any place multiple retrieval sets get merged
+// (a gov-data provider and a web search both landing on the same page, or
+// two comparison subjects citing the same source) -- keeps the first
+// occurrence, so callers that push higher-confidence sources first (e.g.
+// gov-data-provider results before web-search results) keep that one.
+// Deliberately EXACT-STRING matching, not normalized -- this feeds
+// packet.sources, which is what findFabricatedCitations/isSourceReferenced
+// later check the model's own citations against. Confirmed live: widening
+// this to normalized-URL matching caused a real regression -- the model's
+// LIVE DATA CONTEXT (built independently in orchestrate.ts, before this
+// dedup ever runs) still shows every raw URL variant retrieval actually
+// found, so the model would sometimes cite a variant that this function
+// had ALREADY removed as a "duplicate," and the citation-fabrication check
+// then flagged a genuinely-retrieved URL as fabricated. See
+// dedupeSourcesForDisplay below for the stricter, display-only version
+// that's safe to apply AFTER a citation has already been matched against
+// the full set.
+export function dedupeByUrl<T extends { url: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.url)) return false;
+    seen.add(item.url);
+    return true;
+  });
+}
+
 // Normalizes a URL for comparison only (never for display) -- lowercases
 // the host, strips a leading "www." and the protocol, and drops a single
 // trailing slash. Deliberately leaves the path/query untouched otherwise:
@@ -245,40 +271,37 @@ function normalizeUrlForDedup(url: string): string {
   }
 }
 
-// Shared de-duplication for any place multiple retrieval sets get merged
-// (a gov-data provider and a web search both landing on the same page, or
-// two comparison subjects citing the same source) -- keeps the first
-// occurrence, so callers that push higher-confidence sources first (e.g.
-// gov-data-provider results before web-search results) keep that one.
-//
 // Confirmed live: a single ILGA statute page for 740 ILCS 14/15 came back
 // as FIVE separate retrieval results -- http vs. https, with vs. without
 // "www.", and two entirely different URL PATHS the same site serves the
 // same section through ("legislation/ilcs/fulltext.asp?DocName=..." and
-// "documents/legislation/ilcs/documents/....htm"). Exact-string matching
-// caught none of these: the first three differ by protocol/host string
-// alone (fixed by comparing normalized URLs, not raw ones); the last two
-// are genuinely different paths that normalization alone can't unify.
-// Falling back to an exact TITLE match (only for a title specific enough
-// to mean something -- a generic placeholder like "-" must never collapse
-// unrelated documents together) catches that remaining case, since a
-// retrieval source's title is drawn from the page's own stated subject,
-// not its URL -- two truly different documents essentially never share
-// the identical title string.
+// "documents/legislation/ilcs/documents/....htm"). All five reached the
+// user-facing Sources panel as separate entries. dedupeByUrl's exact-match
+// comparison is deliberately conservative (see its own doc comment for
+// why), so it doesn't collapse these -- this is the stricter pass instead,
+// meant ONLY for the already-filtered, already-citation-matched list a
+// caller is about to actually display or count. Comparing normalized URLs
+// catches the protocol/www variants; falling back to an exact TITLE match
+// (only for a title specific enough to mean something -- a generic
+// placeholder like "-" must never collapse unrelated documents together)
+// catches the remaining "different path, same document" case, since two
+// truly different documents essentially never share the identical title
+// string. Never call this on a set a citation check still needs to run
+// against -- it can and does drop URLs the model may have genuinely cited.
 const MIN_DEDUP_TITLE_LENGTH = 4;
 
-export function dedupeByUrl<T extends { url: string; title?: string }>(items: T[]): T[] {
+export function dedupeSourcesForDisplay<T extends { url: string; title: string }>(items: T[]): T[] {
   const seenUrls = new Set<string>();
   const seenTitles = new Set<string>();
   return items.filter((item) => {
     const normalizedUrl = normalizeUrlForDedup(item.url);
     if (seenUrls.has(normalizedUrl)) return false;
-    const normalizedTitle = item.title?.trim().toLowerCase();
-    const hasMeaningfulTitle = Boolean(normalizedTitle && normalizedTitle.length >= MIN_DEDUP_TITLE_LENGTH);
-    if (hasMeaningfulTitle && seenTitles.has(normalizedTitle!)) return false;
+    const normalizedTitle = item.title.trim().toLowerCase();
+    const hasMeaningfulTitle = normalizedTitle.length >= MIN_DEDUP_TITLE_LENGTH;
+    if (hasMeaningfulTitle && seenTitles.has(normalizedTitle)) return false;
 
     seenUrls.add(normalizedUrl);
-    if (hasMeaningfulTitle) seenTitles.add(normalizedTitle!);
+    if (hasMeaningfulTitle) seenTitles.add(normalizedTitle);
     return true;
   });
 }

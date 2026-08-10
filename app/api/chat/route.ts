@@ -88,7 +88,7 @@ import {
   scanAndReplaceCitations,
   stripPlaceholderLinks,
 } from "@/lib/research/source-attribution";
-import { dedupeByUrl, sortByAuthority } from "@/lib/research/source-tier";
+import { dedupeSourcesForDisplay, sortByAuthority } from "@/lib/research/source-tier";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
 import { printResearchPlan } from "@/lib/search/retrieval-diagnostics";
 
@@ -1949,7 +1949,7 @@ export const POST = withAuth(async (request, _ctx, user) => {
         // results, and a multi-part response's `allSources` is a
         // cross-section merge where each section's own, earlier dedup pass
         // never saw the others' sources at all.
-        const usedSources = sortByAuthority(dedupeByUrl(filterUsedSources(assistantText, allSources ?? [])));
+        const usedSources = sortByAuthority(dedupeSourcesForDisplay(filterUsedSources(assistantText, allSources ?? [])));
 
         // Confidence was computed against the full retrieval set before
         // generation; recompute it against what was actually used so the

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dedupeByUrl, sourceAuthorityRank, sourceTier } from "./source-tier";
+import { dedupeByUrl, dedupeSourcesForDisplay, sourceAuthorityRank, sourceTier } from "./source-tier";
 
 describe("sourceAuthorityRank -- Attorney General classification", () => {
   it("ranks an Attorney General page alongside state agencies -- the confirmed gap", () => {
@@ -21,14 +21,51 @@ describe("sourceAuthorityRank -- Attorney General classification", () => {
   });
 });
 
-describe("dedupeByUrl -- the confirmed 740 ILCS 14/15 five-copies case", () => {
+describe("dedupeByUrl -- exact-match only, must never drop a genuinely-cited variant", () => {
+  // Confirmed regression: an earlier version of this fix widened dedupeByUrl
+  // itself to normalized-URL matching. Since packet.sources (built with
+  // dedupeByUrl) is what findFabricatedCitations/isSourceReferenced later
+  // check the model's own citations against -- while the model's LIVE DATA
+  // CONTEXT is built independently in orchestrate.ts, before this dedup
+  // ever runs, and still shows every raw variant retrieval actually found
+  // -- collapsing variants here made the model's genuine citation of a
+  // "duplicate" URL look fabricated. dedupeByUrl must stay exact-match;
+  // dedupeSourcesForDisplay (below) is the stricter, display-only version.
+  it("does NOT collapse protocol/www variants of the same URL", () => {
+    const items = [
+      { url: "http://www.ilga.gov/legislation/ilcs/fulltext.asp?DocName=074000140K15" },
+      { url: "https://www.ilga.gov/legislation/ilcs/fulltext.asp?DocName=074000140K15" },
+      { url: "https://ilga.gov/legislation/ilcs/fulltext.asp?DocName=074000140K15" },
+    ];
+    expect(dedupeByUrl(items)).toHaveLength(3);
+  });
+
+  it("does NOT collapse two different URL paths sharing an identical title", () => {
+    const items = [
+      { url: "https://www.ilga.gov/documents/legislation/ilcs/documents/074000140K15.htm", title: "740 ILCS 14/15" },
+      { url: "https://www.ilga.gov/legislation/ilcs/documents/074000140K15.htm", title: "740 ILCS 14/15" },
+    ];
+    expect(dedupeByUrl(items)).toHaveLength(2);
+  });
+
+  it("still collapses a literally identical URL string", () => {
+    const items = [{ url: "https://example.gov/a" }, { url: "https://example.gov/a" }];
+    expect(dedupeByUrl(items)).toHaveLength(1);
+  });
+});
+
+describe("dedupeSourcesForDisplay -- the confirmed 740 ILCS 14/15 five-copies case", () => {
+  // Display-only: safe to apply AFTER filterUsedSources has already
+  // matched the model's actual citations against the full (undeduped) set
+  // -- never before, since it can and does drop URLs the model may have
+  // genuinely cited (see dedupeByUrl's own doc comment above).
   it("collapses http/https and www/non-www variants of the same URL", () => {
     const items = [
       { url: "http://www.ilga.gov/legislation/ilcs/fulltext.asp?DocName=074000140K15", title: "740 ILCS 14/15" },
       { url: "https://www.ilga.gov/legislation/ilcs/fulltext.asp?DocName=074000140K15", title: "740 ILCS 14/15" },
       { url: "https://ilga.gov/legislation/ilcs/fulltext.asp?DocName=074000140K15", title: "740 ILCS 14/15" },
     ];
-    expect(dedupeByUrl(items)).toHaveLength(1);
+    expect(dedupeSourcesForDisplay(items)).toHaveLength(1);
   });
 
   it("collapses two genuinely different URL PATHS for the same document via matching title", () => {
@@ -39,7 +76,7 @@ describe("dedupeByUrl -- the confirmed 740 ILCS 14/15 five-copies case", () => {
       { url: "https://www.ilga.gov/documents/legislation/ilcs/documents/074000140K15.htm", title: "740 ILCS 14/15" },
       { url: "https://www.ilga.gov/legislation/ilcs/documents/074000140K15.htm", title: "740 ILCS 14/15" },
     ];
-    expect(dedupeByUrl(items)).toHaveLength(1);
+    expect(dedupeSourcesForDisplay(items)).toHaveLength(1);
   });
 
   it("collapses all five confirmed real-world variants down to one", () => {
@@ -50,7 +87,7 @@ describe("dedupeByUrl -- the confirmed 740 ILCS 14/15 five-copies case", () => {
       { url: "https://www.ilga.gov/legislation/ilcs/documents/074000140K15.htm", title: "740 ILCS 14/15" },
       { url: "https://ilga.gov/legislation/ilcs/fulltext.asp?DocName=074000140K15", title: "740 ILCS 14/15" },
     ];
-    const result = dedupeByUrl(items);
+    const result = dedupeSourcesForDisplay(items);
     expect(result).toHaveLength(1);
     expect(result[0].url).toBe("http://www.ilga.gov/legislation/ilcs/fulltext.asp?DocName=074000140K15");
   });
@@ -60,7 +97,7 @@ describe("dedupeByUrl -- the confirmed 740 ILCS 14/15 five-copies case", () => {
       { url: "https://ilga.gov/legislation/ilcs/documents/074000140K15.htm", title: "740 ILCS 14/15" },
       { url: "https://ilga.gov/legislation/ilcs/documents/074000140K20.htm", title: "740 ILCS 14/20" },
     ];
-    expect(dedupeByUrl(items)).toHaveLength(2);
+    expect(dedupeSourcesForDisplay(items)).toHaveLength(2);
   });
 
   it("never collapses distinct documents just because they share a generic placeholder title", () => {
@@ -68,12 +105,15 @@ describe("dedupeByUrl -- the confirmed 740 ILCS 14/15 five-copies case", () => {
       { url: "https://ilga.gov/Legislation/ILCS/Articles?ActID=3004", title: "-" },
       { url: "https://ilga.gov/Legislation/ILCS/Articles?ActID=9999", title: "-" },
     ];
-    expect(dedupeByUrl(items)).toHaveLength(2);
+    expect(dedupeSourcesForDisplay(items)).toHaveLength(2);
   });
 
-  it("treats items with no title at all as distinct unless their URLs match", () => {
-    const items = [{ url: "https://example.gov/a" }, { url: "https://example.gov/b" }];
-    expect(dedupeByUrl(items)).toHaveLength(2);
+  it("treats items with an empty title as distinct unless their URLs match", () => {
+    const items = [
+      { url: "https://example.gov/a", title: "" },
+      { url: "https://example.gov/b", title: "" },
+    ];
+    expect(dedupeSourcesForDisplay(items)).toHaveLength(2);
   });
 
   it("keeps two genuinely unrelated bills distinct -- the confirmed SB3122/HB2838 case", () => {
@@ -82,6 +122,6 @@ describe("dedupeByUrl -- the confirmed 740 ILCS 14/15 five-copies case", () => {
       { url: "https://ilga.gov/ftp/legislation/104/HB/10400HB2838.htm", title: "HB2838 104TH GENERAL ASSEMBLY" },
       { url: "https://ilga.gov/legislation/ilcs/documents/074000140K15.htm", title: "740 ILCS 14/15" },
     ];
-    expect(dedupeByUrl(items)).toHaveLength(3);
+    expect(dedupeSourcesForDisplay(items)).toHaveLength(3);
   });
 });
