@@ -34,3 +34,39 @@ describe("classifyPoliticalIntents / isPoliticalQuestion -- bare 'law(s)'/'statu
     expect(intents.has("state_legislation")).toBe(true);
   });
 });
+
+describe("classifyPoliticalIntents / isPoliticalQuestion -- bare statute citations (the confirmed 740 ILCS 14 gap)", () => {
+  it("classifies a bare ILCS citation as state_legislation -- the confirmed live gap", () => {
+    // Confirmed live: "What does 740 ILCS 14 require of private entities
+    // collecting biometric data?" matched NO intent at all (no "statute"/
+    // "law"/"bill"/"act" word anywhere), so it never reached the
+    // government-research pipeline -- the model answered from its own
+    // training knowledge with zero retrieval, zero citation, zero
+    // confidence rating shown.
+    const intents = classifyPoliticalIntents("What does 740 ILCS 14 require of private entities collecting biometric data?");
+    expect(intents.has("state_legislation")).toBe(true);
+    expect(isPoliticalQuestion(intents)).toBe(true);
+  });
+
+  it("classifies a bare U.S.C. citation as federal_legislation", () => {
+    const intents = classifyPoliticalIntents("What does 18 U.S.C. 1030 prohibit?");
+    expect(intents.has("federal_legislation")).toBe(true);
+    expect(isPoliticalQuestion(intents)).toBe(true);
+  });
+
+  it("classifies a bare CFR citation as federal_legislation", () => {
+    const intents = classifyPoliticalIntents("What does 45 CFR 164.502 require of covered entities?");
+    expect(intents.has("federal_legislation")).toBe(true);
+  });
+
+  it("classifies an ILCS citation with a section symbol", () => {
+    const intents = classifyPoliticalIntents("What does 815 ILCS § 505 prohibit?");
+    expect(intents.has("state_legislation")).toBe(true);
+  });
+
+  it("does not misclassify an ordinary sentence with unrelated numbers as a statute citation", () => {
+    const intents = classifyPoliticalIntents("I bought 14 apples and 740 oranges at the store.");
+    expect(intents.has("state_legislation")).toBe(false);
+    expect(intents.has("federal_legislation")).toBe(false);
+  });
+});

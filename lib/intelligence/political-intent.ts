@@ -34,6 +34,25 @@ const STATE_BILL_RE = /\b(?:[hs]\.?\s?b\.?\s?\d+|house bill \d+|senate bill \d+)
 const FEDERAL_LEGISLATION_RE = /\bfederal (law|legislation|bill|statute)\b|\bact of congress\b|\bcongress passed\b/i;
 const STATE_LEGISLATION_RE = /\bstate (law|legislation|bill|statute)\b|\bstate legislature\b/i;
 
+// Confirmed gap: a bare statute citation ("740 ILCS 14", "18 U.S.C. 1030",
+// "45 CFR 164.502") names a specific legal document but uses none of the
+// literal words this classifier otherwise keys on ("law," "statute,"
+// "bill," "act"). "What does 740 ILCS 14 require of private entities
+// collecting biometric data?" matched NO intent at all, so the question
+// never reached the government-research pipeline -- not a citation-
+// attachment or rendering failure, but a routing failure: retrieval,
+// ranking, and citation-attachment never ran, so there was nothing to
+// attach. The model answered from its own training knowledge with zero
+// sourcing, zero citation, zero confidence rating. ILCS is Illinois-
+// specific (state); U.S.C./CFR are federal. Same pattern already used by
+// lib/search/canonical-source.ts's STATUTE_CITATION_RE for a different
+// purpose (identifying the canonical document to retrieve) -- duplicated
+// here as a self-contained local constant rather than imported, matching
+// this file's existing convention of not depending on lib/search from
+// lib/intelligence (intent classification runs before any search does).
+const STATE_STATUTE_CITATION_RE = /\b\d+\s*ILCS\s*(?:[§#]|sec\.?)?\s*\d+(?:[.\-]\d+)*\b/i;
+const FEDERAL_STATUTE_CITATION_RE = /\b\d+\s*(?:U\.?S\.?C\.?|CFR)\s*(?:[§#]|sec\.?)?\s*\d+(?:[.\-]\d+)*\b/i;
+
 // Catches a specific law referenced by its common capitalized name (e.g.
 // "the Live Local Act", "the Inflation Reduction Act", "the Affordable Care
 // Act") -- a huge share of real questions name a law this way rather than
@@ -87,8 +106,14 @@ export function classifyPoliticalIntents(text: string): Set<PoliticalIntent> {
   const namedState = detectState(text);
 
   add(POLITICAL_RE.test(text) || namedAct, "political");
-  add(FEDERAL_BILL_RE.test(text) || FEDERAL_LEGISLATION_RE.test(text) || (namedAct && !namedState), "federal_legislation");
-  add(STATE_BILL_RE.test(text) || STATE_LEGISLATION_RE.test(text) || (namedAct && Boolean(namedState)), "state_legislation");
+  add(
+    FEDERAL_BILL_RE.test(text) || FEDERAL_LEGISLATION_RE.test(text) || FEDERAL_STATUTE_CITATION_RE.test(text) || (namedAct && !namedState),
+    "federal_legislation",
+  );
+  add(
+    STATE_BILL_RE.test(text) || STATE_LEGISLATION_RE.test(text) || STATE_STATUTE_CITATION_RE.test(text) || (namedAct && Boolean(namedState)),
+    "state_legislation",
+  );
   add(ELECTIONS_RE.test(text), "elections");
   add(CAMPAIGN_FINANCE_RE.test(text), "campaign_finance");
   add(SUPREME_COURT_RE.test(text), "supreme_court");
