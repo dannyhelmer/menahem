@@ -632,6 +632,16 @@ export async function buildResearchPacket(
     bill_status: "official bill status",
     court_opinion: "official opinion",
     agency_record: "official record",
+    // Confirmed live: "Who is the current governor of Illinois?" issued
+    // completely unbiased and returned two unrelated illinois.gov pages,
+    // neither mentioning the governor at all. "Official" nudges toward the
+    // jurisdiction's own site over incidental mentions elsewhere; "current"
+    // is deliberately still included here even though it's now excluded
+    // from significant-terms scoring (see TERM_STOPWORDS in orchestrate.ts)
+    // -- it's too generic to DISCRIMINATE among retrieved candidates, but
+    // still useful as a search-engine signal that this isn't a historical
+    // question.
+    current_officeholder: "official current",
   };
   const searchQuery = isLegislative
     ? `${question} official legislature bill text status`
@@ -643,8 +653,11 @@ export async function buildResearchPacket(
   // statute) needs a wider net than a single bill does -- there are a
   // dozen-plus candidate pages on the SAME official site, and the right
   // one has to actually be among whatever gets fetched for the ranking to
-  // have a chance at promoting it.
-  const canonicalNeedsWiderNet = canonicalTarget?.kind === "constitution" || canonicalTarget?.kind === "statute";
+  // have a chance at promoting it. A current-officeholder lookup similarly
+  // benefits from a wider net -- confirmed live, the default result count
+  // surfaced nothing on-topic at all for it.
+  const canonicalNeedsWiderNet =
+    canonicalTarget?.kind === "constitution" || canonicalTarget?.kind === "statute" || canonicalTarget?.kind === "current_officeholder";
   const billNumber = extractBillNumber(question);
   const questionGeneralAssemblies = extractAllGeneralAssemblies(question);
   // A wider raw candidate pool gives the ranking in orchestrate.ts (applied

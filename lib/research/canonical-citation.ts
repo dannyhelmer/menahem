@@ -44,6 +44,7 @@ const TYPE_SIGNAL_RE: Record<CanonicalTargetKind, RegExp> = {
   bill_status: /\bbill\b|\bstatus\b/i,
   court_opinion: /\bopinion\b|\bcourt\b|\bheld\b|\bholding\b/i,
   agency_record: /\bagency\b/i,
+  current_officeholder: /\bgovernor\b|\bsenator\b|\brepresentative\b|\bmayor\b|\bpresident\b|\battorney general\b|\bsecretary of state\b|\btreasurer\b|\bcomptroller\b/i,
 };
 
 const HEADING_RE = /^##\s+(.+)$/gm;

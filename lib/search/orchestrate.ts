@@ -99,12 +99,20 @@ export interface TaskContext {
 // title (e.g. "bill" alone would match congress.gov/most-viewed-bills
 // against literally any bill-related task, which is exactly the false
 // positive that let it slip through as an accepted "official domain hit").
+// Confirmed live: "Who is the current governor of Illinois?" stops down to
+// just ["current", "governor"] as its significant terms. "current" is
+// generic enough to appear in totally unrelated pages ("current trail
+// closures," "current programs") for the same reason "bill" alone was
+// excluded above -- it let a state park trail-closure page and a farmers-
+// market homepage both pass the relevance gate on "current" alone, neither
+// one ever mentioning the governor, purely because no OTHER significant
+// term was left to require.
 const TERM_STOPWORDS = new Set([
   "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "by", "is", "are", "was", "were",
   "be", "been", "this", "that", "these", "those", "what", "which", "who", "how", "when", "where", "why",
   "does", "do", "did", "have", "has", "had", "any", "from", "into", "about", "compare", "regulate", "regulates",
   "law", "laws", "bill", "bills", "act", "acts", "state", "states", "government", "official", "officials",
-  "section", "code", "statute", "statutes",
+  "section", "code", "statute", "statutes", "current", "currently", "now", "today",
 ]);
 
 // Structural boilerplate from THIS module's own task-text template (see

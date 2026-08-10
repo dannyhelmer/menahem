@@ -33,6 +33,16 @@ describe("computeSignificantTerms", () => {
     expect(terms).toContain("data");
     expect(terms).toContain("broker");
   });
+
+  it("excludes 'current' -- the confirmed Illinois governor contamination case", () => {
+    // Confirmed live: "Who is the current governor of Illinois?" reduced to
+    // just ["current", "governor"] as significant terms, and "current" was
+    // generic enough to match a state-park trail-closure page and a
+    // farmers-market homepage, neither ever mentioning the governor.
+    const terms = computeSignificantTerms("Who is the current governor of Illinois?", "Illinois");
+    expect(terms).not.toContain("current");
+    expect(terms).toEqual(["governor"]);
+  });
 });
 
 describe("scoreRelevance / passesRelevanceGate -- the confirmed Nevada/Massachusetts contamination cases", () => {
@@ -139,5 +149,27 @@ describe("rankingScore -- relevance is primary, authority only a tiebreaker", ()
     const titleMatch = rankingScore({ matchedTerms: ["broker"], ratio: 0.3, titleMatch: true }, 10);
     const bodyOnlyMatch = rankingScore({ matchedTerms: ["broker"], ratio: 0.3, titleMatch: false }, 10);
     expect(titleMatch).toBeGreaterThan(bodyOnlyMatch);
+  });
+});
+
+describe("passesRelevanceGate -- the confirmed Illinois governor contamination case, end to end", () => {
+  const terms = computeSignificantTerms("Who is the current governor of Illinois?", "Illinois");
+
+  it("rejects the confirmed unrelated trail-closure page now that 'current' no longer counts", () => {
+    const relevance = scoreRelevance(terms, "Starved Rock Trail Improvement Project", "The current closure affects the north trail.");
+    expect(relevance.matchedTerms).toEqual([]);
+    expect(passesRelevanceGate(terms, relevance)).toBe(false);
+  });
+
+  it("rejects the confirmed unrelated farmers-market homepage now that 'current' no longer counts", () => {
+    const relevance = scoreRelevance(terms, "Home", "Find current farmers markets across Illinois.");
+    expect(relevance.matchedTerms).toEqual([]);
+    expect(passesRelevanceGate(terms, relevance)).toBe(false);
+  });
+
+  it("still accepts a genuine page about the governor", () => {
+    const relevance = scoreRelevance(terms, "Office of the Governor", "JB Pritzker is the current Governor of Illinois.");
+    expect(relevance.matchedTerms).toEqual(["governor"]);
+    expect(passesRelevanceGate(terms, relevance)).toBe(true);
   });
 });

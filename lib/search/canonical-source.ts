@@ -20,7 +20,14 @@
 
 import { extractBillNumber } from "@/lib/intelligence/bill-number";
 
-export type CanonicalTargetKind = "constitution" | "statute" | "bill_text" | "bill_status" | "court_opinion" | "agency_record";
+export type CanonicalTargetKind =
+  | "constitution"
+  | "statute"
+  | "bill_text"
+  | "bill_status"
+  | "court_opinion"
+  | "agency_record"
+  | "current_officeholder";
 
 export interface CanonicalTarget {
   kind: CanonicalTargetKind;
@@ -52,6 +59,23 @@ const COURT_HINT_RE = /\bopinion\b|\bholding\b|\bruling\b|\bcourt\b|\bdecided\b|
 
 const AGENCY_NAME_RE = /\b(?:attorney general|department of [a-z]+|[a-z]+ commission|[a-z]+ agency|board of [a-z]+)\b/i;
 const AGENCY_ACTION_RE = /\baction\b|\bdecision\b|\bguidance\b|\bruling\b|\brecord\b|\benforcement\b|\bfiling\b|\border\b/i;
+
+// Confirmed live: "Who is the current governor of Illinois?" retrieved
+// (and the model was then allowed to answer from, citing an invented
+// illinois.gov URL for) two completely unrelated illinois.gov pages -- a
+// state-park trail closure and a farmers-market homepage -- because
+// nothing in the retrieval/ranking pipeline recognized this as a specific
+// kind of question at all, so it fell back to the same generic keyword
+// scoring every other unclassified question gets. "Who currently holds
+// office X" is a distinct, common question shape (governor, attorney
+// general, senator, mayor, president, ...) that deserves the same
+// treatment as a specific document: identify the OFFICE being asked
+// about, then require a candidate to actually be about that office, not
+// just any page on the jurisdiction's domain.
+const OFFICE_TITLE_ALTERNATION =
+  "governor|lieutenant governor|attorney general|secretary of state|treasurer|comptroller|" +
+  "(?:u\\.?s\\.?\\s+)?senator|(?:u\\.?s\\.?\\s+)?representative|mayor|vice president|president|speaker of the house";
+const WHO_IS_OFFICEHOLDER_RE = new RegExp(`\\bwho(?:'s|\\s+is)\\b[^.?!]{0,40}\\b(${OFFICE_TITLE_ALTERNATION})\\b`, "i");
 
 // Order matters: a question can technically match more than one pattern
 // (e.g. a statute citation inside a sentence that also says "court"), so
@@ -85,6 +109,16 @@ export function detectCanonicalTarget(question: string): CanonicalTarget | null 
   const caseMatch = question.match(CASE_NAME_RE);
   if (caseMatch && COURT_HINT_RE.test(question)) {
     return { kind: "court_opinion", identifiers: [`${caseMatch[1].toLowerCase()} v ${caseMatch[2].toLowerCase()}`] };
+  }
+
+  // Checked before agency_record: "who is the attorney general" would
+  // otherwise also satisfy AGENCY_NAME_RE's bare "attorney general" match,
+  // but asking WHO holds an office is a more specific signal than merely
+  // naming the office, and needs its own targeted query bias (see
+  // packet.ts) rather than the generic "official agency record" one.
+  const officeholderMatch = question.match(WHO_IS_OFFICEHOLDER_RE);
+  if (officeholderMatch) {
+    return { kind: "current_officeholder", identifiers: [officeholderMatch[1].toLowerCase().replace(/\s+/g, " ")] };
   }
 
   const agencyMatch = question.match(AGENCY_NAME_RE);
@@ -137,6 +171,17 @@ export function matchesCanonicalTarget(target: CanonicalTarget, url: string, tit
       return includesAll(courtHaystack, target.identifiers);
     case "agency_record":
       return target.identifiers.length === 0 || target.identifiers.some((id) => haystack.includes(id));
+    case "current_officeholder":
+      // The confirmed failure mode was a page with NO connection to the
+      // office at all (a trail closure, a farmers-market homepage) -- the
+      // bar here is deliberately just "genuinely discusses this office,"
+      // not "is the one authoritative current-officeholder record" (no
+      // single canonical URL exists the way a bill or statute has one).
+      // That weaker bar is enough to reject what actually went wrong here,
+      // while still letting a real biography/leadership page, a news
+      // article naming the officeholder, or the office's own state-portal
+      // page all qualify.
+      return target.identifiers.every((id) => haystack.includes(id));
     default:
       return false;
   }

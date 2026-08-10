@@ -70,6 +70,44 @@ describe("detectCanonicalTarget -- agency record", () => {
   });
 });
 
+describe("detectCanonicalTarget -- current officeholder (the confirmed Illinois governor case)", () => {
+  it("detects a current-officeholder target for the exact confirmed live query", () => {
+    const target = detectCanonicalTarget("Who is the current governor of Illinois?");
+    expect(target).toEqual({ kind: "current_officeholder", identifiers: ["governor"] });
+  });
+
+  it("detects the same target without the word 'current'", () => {
+    const target = detectCanonicalTarget("Who is the governor of Illinois?");
+    expect(target?.kind).toBe("current_officeholder");
+  });
+
+  it("detects a possessive phrasing", () => {
+    const target = detectCanonicalTarget("Who is Illinois's governor?");
+    expect(target?.kind).toBe("current_officeholder");
+  });
+
+  it("generalizes to a DIFFERENT state and a DIFFERENT office -- not hardcoded to Illinois/governor", () => {
+    const target = detectCanonicalTarget("Who is the current attorney general of Texas?");
+    expect(target).toEqual({ kind: "current_officeholder", identifiers: ["attorney general"] });
+  });
+
+  it("generalizes to a U.S. Senator query", () => {
+    const target = detectCanonicalTarget("Who is the current U.S. Senator from California?");
+    expect(target?.kind).toBe("current_officeholder");
+    expect(target?.identifiers[0]).toContain("senator");
+  });
+
+  it("generalizes to a mayor query", () => {
+    const target = detectCanonicalTarget("Who's the mayor of Chicago?");
+    expect(target?.kind).toBe("current_officeholder");
+  });
+
+  it("does not misclassify a question that merely mentions an office without asking who holds it", () => {
+    const target = detectCanonicalTarget("What powers does the governor of Illinois have?");
+    expect(target?.kind).not.toBe("current_officeholder");
+  });
+});
+
 describe("matchesCanonicalTarget -- Constitution: excludes amendment proposals, glossaries, and unrelated pages", () => {
   const target = { kind: "constitution" as const, identifiers: [] };
 
@@ -195,6 +233,53 @@ describe("matchesCanonicalTarget -- agency record", () => {
   it("rejects a page from an unrelated agency", () => {
     const target = { kind: "agency_record" as const, identifiers: ["attorney general"] };
     expect(matchesCanonicalTarget(target, "https://dol.illinois.gov/action", "Department of Labor Enforcement Action", "")).toBe(false);
+  });
+});
+
+describe("matchesCanonicalTarget -- current officeholder (the confirmed Illinois governor case)", () => {
+  const governorTarget = { kind: "current_officeholder" as const, identifiers: ["governor"] };
+
+  it("rejects the confirmed unrelated page: a state-park trail closure", () => {
+    expect(
+      matchesCanonicalTarget(
+        governorTarget,
+        "https://dnr.illinois.gov/closures/starved-rock-trail-improvement.html",
+        "Starved Rock Trail Improvement Project",
+        "The current closure affects the north trail through spring.",
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects the confirmed unrelated page: a farmers-market homepage", () => {
+    expect(
+      matchesCanonicalTarget(
+        governorTarget,
+        "https://agr.illinois.gov/consumers/illinoisproductsfarmersmarket.html",
+        "Home",
+        "Find current farmers markets across Illinois.",
+      ),
+    ).toBe(false);
+  });
+
+  it("matches a genuine page about the governor", () => {
+    expect(
+      matchesCanonicalTarget(
+        governorTarget,
+        "https://www.illinois.gov/government/executive-branch/governor.html",
+        "Office of the Governor",
+        "JB Pritzker is the current Governor of the State of Illinois.",
+      ),
+    ).toBe(true);
+  });
+
+  it("generalizes to a different office and jurisdiction -- not hardcoded to Illinois/governor", () => {
+    const mayorTarget = { kind: "current_officeholder" as const, identifiers: ["mayor"] };
+    expect(matchesCanonicalTarget(mayorTarget, "https://www.chicago.gov/city/en/depts/mayor.html", "Office of the Mayor", "")).toBe(
+      true,
+    );
+    expect(
+      matchesCanonicalTarget(mayorTarget, "https://www.chicago.gov/city/en/depts/streets.html", "Streets and Sanitation", ""),
+    ).toBe(false);
   });
 });
 
