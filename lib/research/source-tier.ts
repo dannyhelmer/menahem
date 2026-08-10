@@ -226,16 +226,59 @@ export function sourceAuthorityRank(url: string, title = ""): number {
   return 10; // private websites / unclassified
 }
 
+// Normalizes a URL for comparison only (never for display) -- lowercases
+// the host, strips a leading "www." and the protocol, and drops a single
+// trailing slash. Deliberately leaves the path/query untouched otherwise:
+// over-normalizing risks a false negative where two genuinely different
+// pages on the same host get treated as duplicates. Local to this file
+// (not imported from lib/research/source-attribution.ts's own copy) to
+// keep the two modules independently self-contained, matching this
+// codebase's existing convention for small, focused utilities.
+function normalizeUrlForDedup(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const path = parsed.pathname.replace(/\/$/, "");
+    return `${host}${path}${parsed.search}`;
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
 // Shared de-duplication for any place multiple retrieval sets get merged
 // (a gov-data provider and a web search both landing on the same page, or
 // two comparison subjects citing the same source) -- keeps the first
 // occurrence, so callers that push higher-confidence sources first (e.g.
 // gov-data-provider results before web-search results) keep that one.
-export function dedupeByUrl<T extends { url: string }>(items: T[]): T[] {
-  const seen = new Set<string>();
+//
+// Confirmed live: a single ILGA statute page for 740 ILCS 14/15 came back
+// as FIVE separate retrieval results -- http vs. https, with vs. without
+// "www.", and two entirely different URL PATHS the same site serves the
+// same section through ("legislation/ilcs/fulltext.asp?DocName=..." and
+// "documents/legislation/ilcs/documents/....htm"). Exact-string matching
+// caught none of these: the first three differ by protocol/host string
+// alone (fixed by comparing normalized URLs, not raw ones); the last two
+// are genuinely different paths that normalization alone can't unify.
+// Falling back to an exact TITLE match (only for a title specific enough
+// to mean something -- a generic placeholder like "-" must never collapse
+// unrelated documents together) catches that remaining case, since a
+// retrieval source's title is drawn from the page's own stated subject,
+// not its URL -- two truly different documents essentially never share
+// the identical title string.
+const MIN_DEDUP_TITLE_LENGTH = 4;
+
+export function dedupeByUrl<T extends { url: string; title?: string }>(items: T[]): T[] {
+  const seenUrls = new Set<string>();
+  const seenTitles = new Set<string>();
   return items.filter((item) => {
-    if (seen.has(item.url)) return false;
-    seen.add(item.url);
+    const normalizedUrl = normalizeUrlForDedup(item.url);
+    if (seenUrls.has(normalizedUrl)) return false;
+    const normalizedTitle = item.title?.trim().toLowerCase();
+    const hasMeaningfulTitle = Boolean(normalizedTitle && normalizedTitle.length >= MIN_DEDUP_TITLE_LENGTH);
+    if (hasMeaningfulTitle && seenTitles.has(normalizedTitle!)) return false;
+
+    seenUrls.add(normalizedUrl);
+    if (hasMeaningfulTitle) seenTitles.add(normalizedTitle!);
     return true;
   });
 }

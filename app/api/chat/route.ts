@@ -88,7 +88,7 @@ import {
   scanAndReplaceCitations,
   stripPlaceholderLinks,
 } from "@/lib/research/source-attribution";
-import { sortByAuthority } from "@/lib/research/source-tier";
+import { dedupeByUrl, sortByAuthority } from "@/lib/research/source-tier";
 import { runSearchWithRetry, type SearchSource } from "@/lib/search/orchestrate";
 import { printResearchPlan } from "@/lib/search/retrieval-diagnostics";
 
@@ -1943,7 +1943,13 @@ export const POST = withAuth(async (request, _ctx, user) => {
         // but plain web search never did, and pruning-then-filtering is not
         // itself a ranking step -- the displayed Sources list must always
         // read most-authoritative-first regardless of which path produced it.
-        const usedSources = sortByAuthority(filterUsedSources(assistantText, allSources ?? []));
+        // Deduped here too (not just at packet-construction time) as a
+        // defensive final pass -- confirmed live, a single ILGA statute
+        // section came back as five differently-formatted retrieval
+        // results, and a multi-part response's `allSources` is a
+        // cross-section merge where each section's own, earlier dedup pass
+        // never saw the others' sources at all.
+        const usedSources = sortByAuthority(dedupeByUrl(filterUsedSources(assistantText, allSources ?? [])));
 
         // Confidence was computed against the full retrieval set before
         // generation; recompute it against what was actually used so the

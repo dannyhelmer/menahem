@@ -324,3 +324,37 @@ describe("isSourceReferenced / hasOfficialCitation", () => {
     expect(hasOfficialCitation("Per Example.com...", sources)).toBe(false);
   });
 });
+
+describe("isSourceReferenced -- does not false-positive on a DIFFERENT source's own cited href (the confirmed SB3122 case)", () => {
+  // Confirmed live: citing ONE ilga.gov source's full URL made an entirely
+  // unrelated ilga.gov source (SB3122, for a question about a completely
+  // different data-broker statute) register as "referenced" too, purely
+  // because "ilga.gov" is a substring of whatever URL actually got cited.
+  const citedText =
+    "740 ILCS 14, also known as BIPA, requires written consent before collecting biometric data " +
+    "[740 ILCS 14/15](https://www.ilga.gov/legislation/ilcs/documents/074000140K15.htm).";
+
+  it("does not match an unrelated same-domain source that was never actually named", () => {
+    const unrelatedBill = { title: "SB3122 104TH GENERAL ASSEMBLY", url: "https://ilga.gov/ftp/legislation/104/SB/10400SB3122.htm" };
+    expect(isSourceReferenced(citedText, unrelatedBill)).toBe(false);
+  });
+
+  it("does not match via the unrelated source's own title-clause split on a hyphenated title either", () => {
+    const unrelatedBill = {
+      title: "Illinois General Assembly - Full Text of SB3122",
+      url: "https://www.ilga.gov/Legislation/BillStatus/FullText?GAID=18&DocNum=3122",
+    };
+    expect(isSourceReferenced(citedText, unrelatedBill)).toBe(false);
+  });
+
+  it("still correctly matches the source that WAS actually cited", () => {
+    const actuallyCited = { title: "740 ILCS 14/15", url: "https://www.ilga.gov/legislation/ilcs/documents/074000140K15.htm" };
+    expect(isSourceReferenced(citedText, actuallyCited)).toBe(true);
+  });
+
+  it("still matches via a genuine hostname mention in prose, not embedded in an href, alongside an unrelated cited link", () => {
+    const text = "According to Ilga.gov, the statute requires consent [see full text](https://www.ilga.gov/other/page.htm).";
+    const namedInProse = { title: "ILGA Overview", url: "https://www.ilga.gov/legislation/ilcs/documents/074000140K15.htm" };
+    expect(isSourceReferenced(text, namedInProse)).toBe(true);
+  });
+});

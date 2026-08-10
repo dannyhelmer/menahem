@@ -27,6 +27,8 @@ function hostnameOf(url: string): string {
   }
 }
 
+const URL_IN_TEXT_RE = /https?:\/\/[^\s)\]}"'<>]+/g;
+
 // A source counts as referenced if the final response text names it --
 // by URL, by hostname (covers "Congress.gov" being written out even though
 // the retrieved title was "Congress.gov -- H.R. 1"), or by ANY
@@ -36,15 +38,32 @@ function hostnameOf(url: string): string {
 // Senate" are both real, common shapes, and a citation like "(Florida
 // Senate)" must still match the second one, not just a title that happens
 // to lead with the org name.
+//
+// Confirmed live: citing ONE ilga.gov source's full URL made every OTHER
+// retrieved ilga.gov source (completely unrelated bills, e.g. SB3122 for
+// a question entirely about a data-broker statute) register as
+// "referenced" too -- because "ilga.gov" is a substring of whatever URL
+// actually got cited, and the hostname check was matching against the
+// FULL text, hrefs included. The hostname/title-clause checks exist to
+// catch the model naming a source in PROSE without necessarily including
+// its full URL (e.g. "According to Congress.gov...") -- not to catch a
+// substring that only appears because a DIFFERENT source's own href
+// happens to contain it. Every actual cited URL is stripped out before
+// those two checks run, so a hostname/title match can only come from
+// genuine prose, never from someone else's citation. The exact-URL check
+// above still runs against the full, unmodified text -- that one is
+// supposed to match inside an href.
 export function isSourceReferenced(text: string, source: { title: string; url: string }): boolean {
   const lowerText = text.toLowerCase();
   if (source.url && lowerText.includes(source.url.toLowerCase())) return true;
 
+  const proseOnlyText = lowerText.replace(URL_IN_TEXT_RE, " ");
+
   const host = hostnameOf(source.url);
-  if (host && lowerText.includes(host)) return true;
+  if (host && proseOnlyText.includes(host)) return true;
 
   const clauses = source.title.split(/[-–—|:]/).map((clause) => clause.trim());
-  return clauses.some((clause) => clause.length >= 4 && lowerText.includes(clause.toLowerCase()));
+  return clauses.some((clause) => clause.length >= 4 && proseOnlyText.includes(clause.toLowerCase()));
 }
 
 // Filters a retrieval set down to only what the final response actually
