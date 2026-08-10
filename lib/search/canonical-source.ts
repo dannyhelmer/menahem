@@ -172,16 +172,20 @@ export function matchesCanonicalTarget(target: CanonicalTarget, url: string, tit
     case "agency_record":
       return target.identifiers.length === 0 || target.identifiers.some((id) => haystack.includes(id));
     case "current_officeholder":
-      // The confirmed failure mode was a page with NO connection to the
-      // office at all (a trail closure, a farmers-market homepage) -- the
-      // bar here is deliberately just "genuinely discusses this office,"
-      // not "is the one authoritative current-officeholder record" (no
-      // single canonical URL exists the way a bill or statute has one).
-      // That weaker bar is enough to reject what actually went wrong here,
-      // while still letting a real biography/leadership page, a news
-      // article naming the officeholder, or the office's own state-portal
-      // page all qualify.
-      return target.identifiers.every((id) => haystack.includes(id));
+      // Confirmed live (round 2): checking the full haystack (title+body)
+      // let this through for exactly the wrong reason. State agency sites
+      // near-universally credit the sitting officeholder in a global
+      // header/footer ("Governor JB Pritzker") on EVERY page of the
+      // domain, so a trail-closure page's fetched body text still
+      // contained "governor" -- title+body matching treated boilerplate
+      // as if it were the page's actual subject. A page genuinely ABOUT
+      // the officeholder (a bio/leadership page, a news article naming
+      // them, the office's own portal page) names the office in its own
+      // TITLE; incidental site-wide chrome does not. Title-only is also
+      // what correctly keeps a multi-word office title ("attorney
+      // general") from being satisfied by two unrelated incidental
+      // mentions elsewhere on the page.
+      return target.identifiers.every((id) => lowerTitle.includes(id));
     default:
       return false;
   }

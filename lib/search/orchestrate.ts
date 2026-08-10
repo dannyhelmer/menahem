@@ -1,4 +1,9 @@
-import { CANONICAL_STRICT_RELEVANCE_RATIO, detectCanonicalTarget, matchesCanonicalTarget } from "./canonical-source";
+import {
+  CANONICAL_STRICT_RELEVANCE_RATIO,
+  detectCanonicalTarget,
+  matchesCanonicalTarget,
+  type CanonicalTargetKind,
+} from "./canonical-source";
 import { fetchPageText } from "./fetch";
 import { getConfiguredProviders } from "./registry";
 import { stateForDomain } from "./source-router";
@@ -211,10 +216,26 @@ export function rankingScore(relevance: RelevanceScore, authorityRank: number): 
 export function passesRelevanceGate(
   terms: string[],
   relevance: RelevanceScore,
-  canonicalContext?: { hasCanonicalTarget: boolean; isCanonicalMatch: boolean },
+  canonicalContext?: { hasCanonicalTarget: boolean; isCanonicalMatch: boolean; kind?: CanonicalTargetKind },
 ): boolean {
   if (terms.length === 0) return true;
   if (canonicalContext?.hasCanonicalTarget && !canonicalContext.isCanonicalMatch) {
+    // Confirmed live (round 2): the partial-credit ratio bar that's right
+    // for a Constitution article's distinctive vocabulary is wrong for a
+    // current-officeholder target. Its identifiers are short, common
+    // office-title words ("attorney," "general," "governor") that show up
+    // constantly on totally unrelated pages -- "attorney" in generic
+    // "consult an attorney" boilerplate, "general" in an unrelated
+    // "General Information" heading -- so a Texas cannabis-law guide hit
+    // matchedTerms=["attorney","general"] (ratio 1.0, both words present,
+    // neither because the page is actually about the Attorney General) and
+    // sailed past the 0.5 bar. There's no genuine partial-credit case to
+    // preserve here the way there was for the Constitution: a real
+    // secondary source about the officeholder (a news article, a bio page)
+    // names the office in its own title, so it already clears
+    // isCanonicalMatch (see matchesCanonicalTarget's title-only check for
+    // this kind) without needing this fallback at all.
+    if (canonicalContext.kind === "current_officeholder") return false;
     return relevance.ratio >= CANONICAL_STRICT_RELEVANCE_RATIO;
   }
   return relevance.matchedTerms.length > 0;
@@ -451,7 +472,13 @@ export async function runSearchForMessage(
       const domainState = stateForDomain(host);
       if (domainState && domainState !== taskState) return false;
     }
-    if (!passesRelevanceGate(significantTerms, relevance, { hasCanonicalTarget: canonicalTarget !== null, isCanonicalMatch }))
+    if (
+      !passesRelevanceGate(significantTerms, relevance, {
+        hasCanonicalTarget: canonicalTarget !== null,
+        isCanonicalMatch,
+        kind: canonicalTarget?.kind,
+      })
+    )
       return false;
     return true;
   });
@@ -557,6 +584,7 @@ export async function runSearchForMessage(
       !passesRelevanceGate(significantTerms, scoreRelevance(significantTerms, f.title, f.text), {
         hasCanonicalTarget: canonicalTarget !== null,
         isCanonicalMatch,
+        kind: canonicalTarget?.kind,
       })
     ) {
       recordFiltered(options?.diagnostics, diagPhase, f.url, f.title, "not_topically_relevant_fetched");

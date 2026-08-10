@@ -281,6 +281,43 @@ describe("matchesCanonicalTarget -- current officeholder (the confirmed Illinois
       matchesCanonicalTarget(mayorTarget, "https://www.chicago.gov/city/en/depts/streets.html", "Streets and Sanitation", ""),
     ).toBe(false);
   });
+
+  it("rejects site-wide footer/header boilerplate that mentions the office in the BODY but not the title -- the confirmed round-2 regression", () => {
+    // Confirmed live: dnr.illinois.gov's trail-closure page's fetched full
+    // page text (not just the search snippet) still contained "governor"
+    // because every illinois.gov-family page credits the sitting governor
+    // in a global footer. Checking title+body let this page pass as if it
+    // were genuinely about the governor; it wasn't.
+    expect(
+      matchesCanonicalTarget(
+        governorTarget,
+        "https://dnr.illinois.gov/closures/starved-rock-trail-improvement.html",
+        "Starved Rock Trail Improvement Project",
+        "The current closure affects the north trail. State of Illinois | Governor JB Pritzker",
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a multi-word office title satisfied only by two unrelated incidental mentions -- the confirmed Texas AG regression", () => {
+    // Confirmed live: a Texas State Law Library cannabis-law guide page
+    // matched identifiers=["attorney general"] against title+body because
+    // its title contained "General Information" and its body contained
+    // unrelated boilerplate like "consult an attorney" -- neither mention
+    // had anything to do with the Attorney General. The full phrase
+    // "attorney general" never actually appeared anywhere on the page.
+    const agTarget = { kind: "current_officeholder" as const, identifiers: ["attorney general"] };
+    expect(
+      matchesCanonicalTarget(
+        agTarget,
+        "https://guides.sll.texas.gov/cannabis",
+        "General Information - Cannabis & the Law - Guides at Texas State Law Library",
+        "For legal advice, consult an attorney. This guide provides general information only.",
+      ),
+    ).toBe(false);
+    expect(
+      matchesCanonicalTarget(agTarget, "https://www.texasattorneygeneral.gov/", "Office of the Attorney General | Texas", ""),
+    ).toBe(true);
+  });
 });
 
 describe("canonicalRankBonus", () => {

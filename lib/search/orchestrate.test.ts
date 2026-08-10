@@ -173,3 +173,43 @@ describe("passesRelevanceGate -- the confirmed Illinois governor contamination c
     expect(passesRelevanceGate(terms, relevance)).toBe(true);
   });
 });
+
+describe("passesRelevanceGate -- current_officeholder gets no partial-credit ratio fallback (the confirmed Texas AG regression)", () => {
+  // Confirmed live: "attorney general" word-splits into significant terms
+  // ["attorney", "general"], and a Texas State Law Library cannabis-law
+  // guide page hit BOTH terms incidentally ("consult an attorney" generic
+  // boilerplate, "General Information" as an unrelated heading) for a
+  // matchedTerms ratio of 1.0 -- full marks, despite the page having
+  // nothing to do with the Attorney General. The ordinary canonical-aware
+  // 0.5-ratio fallback (right for a Constitution article's more
+  // distinctive vocabulary) let this straight through.
+  const terms = ["attorney", "general"];
+
+  it("rejects a ratio-1.0 incidental match once kind is current_officeholder", () => {
+    const relevance = scoreRelevance(
+      terms,
+      "General Information - Cannabis & the Law - Guides at Texas State Law Library",
+      "For legal advice, consult an attorney. This guide provides general information only.",
+    );
+    expect(relevance.ratio).toBe(1);
+    expect(passesRelevanceGate(terms, relevance, { hasCanonicalTarget: true, isCanonicalMatch: false, kind: "current_officeholder" })).toBe(
+      false,
+    );
+  });
+
+  it("the same ratio-1.0 match would have passed under the generic canonical fallback (no kind) -- confirms this is officeholder-specific, not a global tightening", () => {
+    const relevance = scoreRelevance(
+      terms,
+      "General Information - Cannabis & the Law - Guides at Texas State Law Library",
+      "For legal advice, consult an attorney. This guide provides general information only.",
+    );
+    expect(passesRelevanceGate(terms, relevance, { hasCanonicalTarget: true, isCanonicalMatch: false })).toBe(true);
+  });
+
+  it("still accepts a genuine Attorney General page, which clears isCanonicalMatch instead of needing the ratio fallback", () => {
+    const relevance = scoreRelevance(terms, "Office of the Attorney General | Texas", "");
+    expect(
+      passesRelevanceGate(terms, relevance, { hasCanonicalTarget: true, isCanonicalMatch: true, kind: "current_officeholder" }),
+    ).toBe(true);
+  });
+});
